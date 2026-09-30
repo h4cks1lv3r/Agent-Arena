@@ -1,0 +1,185 @@
+{
+  "base": {
+    "storage_version": 3,
+    "loss_limit_includes_model_costs": true,
+    "active": {
+      "history": {
+        "original_rows": 5,
+        "exported_rows": 5,
+        "all_original_records_preserved": true,
+        "original_sha256": "15860b3509340d840e135752ef66ea3fc4e3e2507c91b49d65d84c4edb9b2128"
+      },
+      "decisions": {
+        "original_rows": 3,
+        "exported_rows": 3,
+        "all_original_records_preserved": true,
+        "original_sha256": "0aad2ec4527e27d4610e2da853238d98684b7cbe9cec78eb0612b55d5a68226c"
+      },
+      "orders": {
+        "original_rows": 4,
+        "exported_rows": 4,
+        "all_original_records_preserved": true,
+        "original_sha256": "c6633f7a1954e758fdfef4d99748aca148574da18768d64ddc51d98fd0b6b691"
+      },
+      "events": {
+        "original_rows": 2,
+        "exported_rows": 3,
+        "all_original_records_preserved": true,
+        "original_sha256": "b9d0245057f9b3336096763753816a80ece606834d6289e82426871d13e1d885"
+      }
+    },
+    "archived": {
+      "history": {
+        "original_rows": 5,
+        "exported_rows": 5,
+        "all_original_records_preserved": true,
+        "original_sha256": "db0999f34d646816da0e2dae0dc3c68c15b00d985752a526dceb3f776e1a1126"
+      },
+      "decisions": {
+        "original_rows": 3,
+        "exported_rows": 3,
+        "all_original_records_preserved": true,
+        "original_sha256": "afe0fa80b48183c026d656199aba53a656cdfbe4d0a334a1fd9008abe05814aa"
+      },
+      "orders": {
+        "original_rows": 3,
+        "exported_rows": 3,
+        "all_original_records_preserved": true,
+        "original_sha256": "0ee988f63488fa8a6f7e07ef24000f418482d254c6bd29be4e40404c11805305"
+      },
+      "events": {
+        "original_rows": 1,
+        "exported_rows": 1,
+        "all_original_records_preserved": true,
+        "original_sha256": "590cebdf5a7dae0c3f97b723a64f6d324b8938ccef286919bed521206067688e"
+      }
+    },
+    "pending_order_and_reservation_preserved": true,
+    "backup_files": [
+      "arena.sqlite3.pre-v05-20260925T182304250949Z-9c9aae5b.bak"
+    ],
+    "backup_preserves_original_payload_and_passes_integrity_check": true
+  },
+  "ours": {
+    "storage_version": 3,
+    "loss_limit_includes_model_costs": false,
+    "active": {
+      "history": {
+        "original_rows": 5,
+        "exported_rows": 5,
+        "all_original_records_preserved": true,
+        "original_sha256": "92d9c1a3bfda6fc4bfd0a892ddac1327e6b2c498bca6833c5a4a6356b911ba41"
+      },
+      "decisions": {
+        "original_rows": 3,
+        "exported_rows": 3,
+        "all_original_records_preserved": true,
+        "original_sha256": "b095fd90677c7e9e57f816d537c8298d4ac6d73276bccc7171cc32c1be2e8496"
+      },
+      "orders": {
+        "original_rows": 4,
+        "exported_rows": 4,
+        "all_original_records_preserved": true,
+        "original_sha256": "7587678d4c686aad767889d0d51a145214f200f6d5dab958bf6eeab40343273f"
+      },
+      "events": {
+        "original_rows": 2,
+        "exported_rows": 3,
+        "all_original_records_preserved": true,
+        "original_sha256": "b6f57ccac60c5851881b36c1473c8911ea2683abbda5acca249a6238fb1298cb"
+      }
+    },
+    "archived": {
+      "history": {
+        "original_rows": 5,
+        "exported_rows": 5,
+        "all_original_records_preserved": true,
+        "original_sha256": "f2ca21d67fb5f6e4afe0e93d212bb3b19d771acaa7630252d9ce5ec713a52461"
+      },
+      "decisions": {
+        "original_rows": 3,
+        "exported_rows": 3,
+        "all_original_records_preserved": true,
+        "original_sha256": "cfdb523f1c24e0a832b25cd12a120e617394ef7417ae4886c9528cfa59c74d61"
+      },
+      "orders": {
+        "original_rows": 3,
+        "exported_rows": 3,
+        "all_original_records_preserved": true,
+        "original_sha256": "a9b9b991f12a44c0d719436ce210e727dc6d33f0bcd811606f2ab1b7d3acc307"
+      },
+      "events": {
+        "original_rows": 1,
+        "exported_rows": 1,
+        "all_original_records_preserved": true,
+        "original_sha256": "471eb94235f76629b4dba62c33568cf948e3d3a5544d14608f6bc0cda8d6dcba"
+      }
+    },
+    "pending_order_and_reservation_preserved": true,
+    "backup_files": [
+      "arena.sqlite3.pre-v05-20260925T182304288440Z-22c0810c.bak"
+    ],
+    "backup_preserves_original_payload_and_passes_integrity_check": true
+  },
+  "claude": {
+    "storage_version": 3,
+    "loss_limit_includes_model_costs": false,
+    "active": {
+      "history": {
+        "original_rows": 4,
+        "exported_rows": 4,
+        "all_original_records_preserved": true,
+        "original_sha256": "6a785205aaacb7fbdbfcb9148fe0e86745d6bb105c6cb11acc0d117714163691"
+      },
+      "decisions": {
+        "original_rows": 3,
+        "exported_rows": 3,
+        "all_original_records_preserved": true,
+        "original_sha256": "0956d7bb2d47ffa01fb2b236eb6c6f33fac55585d46f392525f932f3aff41a4f"
+      },
+      "orders": {
+        "original_rows": 4,
+        "exported_rows": 4,
+        "all_original_records_preserved": true,
+        "original_sha256": "99fed5995bad2370102129204107e87af01cc09800aff3b6c61292540e71f578"
+      },
+      "events": {
+        "original_rows": 3102,
+        "exported_rows": 3103,
+        "all_original_records_preserved": true,
+        "original_sha256": "a0536a3ed3b82b6a62d1d960c1a375e2cd864454ea37530692a12afe8a50b727"
+      }
+    },
+    "archived": {
+      "history": {
+        "original_rows": 4,
+        "exported_rows": 4,
+        "all_original_records_preserved": true,
+        "original_sha256": "195299b1ec23eea8c4ce90e7028fa85e97d376671d47fcf65bbd06f66a42f02a"
+      },
+      "decisions": {
+        "original_rows": 3,
+        "exported_rows": 3,
+        "all_original_records_preserved": true,
+        "original_sha256": "5c4620822ec3b63907fcf2ff9c2c488e7d6d6d768a1f6eb6fd3959116cbd17af"
+      },
+      "orders": {
+        "original_rows": 3,
+        "exported_rows": 3,
+        "all_original_records_preserved": true,
+        "original_sha256": "646b27cd0654fc2fde4e3adecff9e284ac0abb1290117af3577fa450b3760702"
+      },
+      "events": {
+        "original_rows": 3101,
+        "exported_rows": 3101,
+        "all_original_records_preserved": true,
+        "original_sha256": "09e9f3a8dbe4c18c8d77dd6b4c18e36944e44251cb68282fb120a6ef820ff65f"
+      }
+    },
+    "pending_order_and_reservation_preserved": true,
+    "backup_files": [
+      "arena.sqlite3.pre-v05-20260925T182304411445Z-72cc8b10.bak"
+    ],
+    "backup_preserves_original_payload_and_passes_integrity_check": true
+  }
+}

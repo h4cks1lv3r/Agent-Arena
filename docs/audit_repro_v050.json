@@ -1,0 +1,42 @@
+{
+  "source": "/workspace/scratch/82d9b2539ad5/combined/Agent_Arena",
+  "all_transports": "mocked",
+  "order_403": {
+    "submissions": 1,
+    "status": "rejected",
+    "reserved_cash": 0,
+    "paused_after_five_healthy_monitors": true,
+    "pause_kind": "integrity"
+  },
+  "near_close_exit": {
+    "paused_at_close": true,
+    "pause_kind": "integrity",
+    "pause_reason": "openai: Too close to the session close to submit a new paper order safely.",
+    "paused_after_five_healthy_monitors": true,
+    "position_held_before_next_session": true,
+    "position_held_after_next_session": true,
+    "submissions_after_next_session": 0
+  },
+  "market_close_clock_race": {
+    "clock_reads": 2,
+    "paused": true,
+    "pause_kind": "integrity",
+    "submissions": 0,
+    "position_held": true
+  },
+  "monitor_lock_collision": {
+    "while_monitor_busy": "error",
+    "final_status": "error",
+    "error": "Account work is in progress. This command did not run. Wait for its result and try again.",
+    "executed_routes": []
+  },
+  "restart_permanent_peer_failure": {
+    "experiment_status": "ready",
+    "openai_paused": false,
+    "claude_paused": true,
+    "claude_pause_kind": "integrity",
+    "model_providers": [
+      "openai"
+    ]
+  }
+}

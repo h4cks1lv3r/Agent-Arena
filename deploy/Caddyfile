@@ -1,0 +1,6 @@
+# Replace this hostname and the --public-origin value in agent-arena.service.
+# Standard setup needs this domain's DNS pointed here and TCP 80/443 reachable.
+arena.example.com {
+    encode zstd gzip
+    reverse_proxy 127.0.0.1:8765
+}

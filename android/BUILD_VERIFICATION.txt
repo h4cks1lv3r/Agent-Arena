@@ -1,0 +1,55 @@
+{
+  "application_id": "com.agentarena.mobile",
+  "version": "0.5.1",
+  "version_code": 501,
+  "min_sdk": 26,
+  "target_sdk": 35,
+  "sha256": "3c4160b4326295f8c950e19e521222a4a0cf3ff73c71657d7a1deb4e53b3f01a",
+  "apk_bytes": 33417,
+  "security_test": "OriginPolicy: 33 security checks passed.",
+  "navigation_test": "BackNavigation: 25 regression checks passed.",
+  "build_validation": "Compiled, dexed, zipaligned, signed, and APK signature verified. No device or emulator run claimed."
+}
+
+Verifies
+Verified using v1 scheme (JAR signing): false
+Verified using v2 scheme (APK Signature Scheme v2): true
+Verified using v3 scheme (APK Signature Scheme v3): true
+Verified using v3.1 scheme (APK Signature Scheme v3.1): false
+Verified using v4 scheme (APK Signature Scheme v4): false
+Verified for SourceStamp: false
+Number of signers: 1
+Signer #1 certificate DN: CN=Agent Arena Personal Release, OU=Personal App, O=Agent Arena, C=US
+Signer #1 certificate SHA-256 digest: 42622eac5e79501e3b6b06bb365706680a6faa9405b63d7a20fe55aca3a2f77c
+Signer #1 certificate SHA-1 digest: d503d3cb23f9591ec6e0536f96e98056333ca4a5
+Signer #1 certificate MD5 digest: 93be82ae0f7ee6147fd0b57912b315b5
+Signer #1 key algorithm: RSA
+Signer #1 key size (bits): 3072
+Signer #1 public key SHA-256 digest: 6d48d6eebc7f4b908721fc4fe3cdcc008f5670b59e6e6e2fc36f8db37f1609c8
+Signer #1 public key SHA-1 digest: 4353ad7887743ff755bb7a6a78b1bc91197c74fd
+Signer #1 public key MD5 digest: e6d8d930c831a606bdc31d1d9d068dbf
+
+
+package: name='com.agentarena.mobile' versionCode='501' versionName='0.5.1' platformBuildVersionName='15' platformBuildVersionCode='35' compileSdkVersion='35' compileSdkVersionCodename='15'
+sdkVersion:'26'
+targetSdkVersion:'35'
+uses-permission: name='android.permission.INTERNET'
+application-label:'Agent Arena'
+application-icon-160:'res/mipmap-anydpi-v26/ic_launcher.xml'
+application-icon-65534:'res/mipmap-anydpi-v26/ic_launcher.xml'
+application: label='Agent Arena' icon='res/mipmap-anydpi-v26/ic_launcher.xml'
+launchable-activity: name='com.agentarena.mobile.MainActivity'  label='' icon=''
+feature-group: label=''
+  uses-feature: name='android.hardware.faketouch'
+  uses-implied-feature: name='android.hardware.faketouch' reason='default feature for all apps'
+main
+supports-screens: 'small' 'normal' 'large' 'xlarge'
+supports-any-density: 'true'
+locales: '--_--'
+densities: '160' '65534'
+
+
+Upgrade identity check: v0.5.1 matches the v0.3/v0.4/v0.5.0 application ID and signing certificate. The new version code 501 is greater than 300, 400, and 500.
+Compiled from the shipped Java source with the existing private signing identity; no key material is included in the source or APK deliverable.
+No physical-device, emulator, server connection, or multi-week operational test is claimed.
+Historical v0.5.1 verification is retained below. The current Android source uses version 0.6.1 (601). Its original signed APK was built in Agent Arena Handoff and has not been transferred to or rebuilt on this Windows PC.

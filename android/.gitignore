@@ -1,0 +1,6 @@
+build/
+*.jks
+*.keystore
+*.p12
+*password*
+local.properties

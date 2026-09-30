@@ -1,0 +1,10 @@
+{
+  "tests_run": 334,
+  "failures": 0,
+  "errors": 0,
+  "skipped": 0,
+  "success": true,
+  "wall_seconds": 61.479,
+  "python": "3.12.14",
+  "broker_and_model_transports": "mocked"
+}

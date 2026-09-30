@@ -1,0 +1,4 @@
+PASS: tests/ui_runtime.cjs
+PASS: tests/test_v05_ui_runtime.cjs
+PASS: tests/test_v051_ui_runtime.cjs
+Runtime: Node.js 24.19.0, jsdom 30.1.1. No external network requests.

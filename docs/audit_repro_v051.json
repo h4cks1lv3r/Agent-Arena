@@ -1,0 +1,44 @@
+{
+  "source": "/workspace/scratch/82d9b2539ad5/patch051/Agent_Arena",
+  "all_transports": "mocked",
+  "order_403": {
+    "submissions": 1,
+    "status": "rejected",
+    "reserved_cash": 0,
+    "paused_after_five_healthy_monitors": false,
+    "pause_kind": null
+  },
+  "near_close_exit": {
+    "paused_at_close": false,
+    "pause_kind": null,
+    "pause_reason": "",
+    "paused_after_five_healthy_monitors": false,
+    "position_held_before_next_session": true,
+    "position_held_after_next_session": false,
+    "submissions_after_next_session": 1
+  },
+  "market_close_clock_race": {
+    "clock_reads": 2,
+    "paused": false,
+    "pause_kind": null,
+    "submissions": 0,
+    "position_held": true
+  },
+  "monitor_lock_collision": {
+    "while_monitor_busy": "queued",
+    "final_status": "complete",
+    "error": null,
+    "executed_routes": [
+      "/api/cycle"
+    ]
+  },
+  "restart_permanent_peer_failure": {
+    "experiment_status": "ready",
+    "openai_paused": false,
+    "claude_paused": true,
+    "claude_pause_kind": "integrity",
+    "model_providers": [
+      "openai"
+    ]
+  }
+}

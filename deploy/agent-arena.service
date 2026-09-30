@@ -1,0 +1,34 @@
+# Replace arena.example.com with the exact HTTPS hostname in deploy/Caddyfile.
+# Runtime reads /opt/agent-arena/.env. Keep it private; no secrets in this unit.
+# Restart can restore enabled paper automation when its restart preference allows it.
+# Each active account must reconcile first. STOP, operator pauses and risk holds persist.
+[Unit]
+Description=Agent Arena paper trading server
+Wants=network-online.target
+After=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=agent-arena
+Group=agent-arena
+WorkingDirectory=/opt/agent-arena
+ExecStart=/usr/bin/python3 /opt/agent-arena/server.py --data-dir /var/lib/agent-arena --port 8765 --no-browser --public-origin https://arena.example.com
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=30
+UMask=0077
+StateDirectory=agent-arena
+StateDirectoryMode=0700
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/agent-arena
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target
