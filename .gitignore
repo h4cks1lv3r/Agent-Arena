@@ -1,0 +1,9 @@
+.env
+data/
+__pycache__/
+*.pyc
+android/build/
+*.apk
+*.p12
+*.jks
+*.keystore
