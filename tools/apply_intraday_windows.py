@@ -116,7 +116,7 @@ def deploy(args):
     if source == target or source.is_relative_to(target) or target.is_relative_to(source):
         raise RuntimeError("Source and installed directories must be separate.")
     validation = args.validation.read_text(encoding="utf-8-sig")
-    if "Ran 371 tests" not in validation or "\nOK" not in validation or "FAILED" in validation:
+    if "Ran 386 tests" not in validation or "\nOK" not in validation or "FAILED" in validation:
         raise RuntimeError("The complete offline regression suite must pass before deployment.")
     for root in (source, target):
         for path in root.rglob("*"):
@@ -153,7 +153,7 @@ def deploy(args):
     with (target / "data" / "server.lock").open("r+b") as lock:
         msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
         msvcrt.locking(lock.fileno(), msvcrt.LK_UNLCK, 1)
-    backup = target.with_name(target.name + "_backup_intraday_" + datetime.now().strftime("%Y%m%d_%H%M%S"))
+    backup = target.with_name(target.name + "_backup_swing_" + datetime.now().strftime("%Y%m%d_%H%M%S"))
     if backup.exists() or backup.parent != target.parent:
         raise RuntimeError("Backup path needs review.")
     shutil.copytree(target, backup)
@@ -173,8 +173,8 @@ def deploy(args):
             if digest(target / relative) != expected:
                 raise RuntimeError("Private configuration or ledger preservation failed.")
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    with (target / "data" / ("server-intraday-" + stamp + "-stdout.log")).open("wb") as out, \
-         (target / "data" / ("server-intraday-" + stamp + "-stderr.log")).open("wb") as err:
+    with (target / "data" / ("server-swing-" + stamp + "-stdout.log")).open("wb") as out, \
+         (target / "data" / ("server-swing-" + stamp + "-stderr.log")).open("wb") as err:
         child = subprocess.Popen([sys.executable, "-u", str(target / "server.py"), "--data-dir",
             str(target / "data"), "--no-browser", "--public-origin", client.origin], cwd=target,
             stdin=subprocess.DEVNULL, stdout=out, stderr=err,
@@ -189,10 +189,10 @@ def deploy(args):
             break
         except (OSError, ValueError, RuntimeError):
             time.sleep(.5)
-    if replacement is None or state["version"] != "0.7.0" or state["experiment"]["id"] != exp["id"]:
+    if replacement is None or state["version"] != "0.7.1" or state["experiment"]["id"] != exp["id"]:
         raise RuntimeError("The updated server could not be verified.")
     budget = exp["monthly_model_budget"] if args.model_budget is None else args.model_budget
-    state = replacement.mutate("/api/trading-style", {"style": "aggressive_intraday", "monthly_model_budget": budget})
+    state = replacement.mutate("/api/trading-style", {"style": args.trading_style, "monthly_model_budget": budget})
     for key in ("target", "loss_limit", "position_cap_pct", "exposure_cap_pct", "asset_scope"):
         if state["experiment"].get(key) != exp.get(key):
             raise RuntimeError("An existing experiment boundary changed unexpectedly.")
@@ -220,6 +220,7 @@ def main():
     parser.add_argument("--source", type=Path)
     parser.add_argument("--validation", type=Path)
     parser.add_argument("--model-budget", type=float)
+    parser.add_argument("--trading-style", choices=("fast_swing", "fast_swing_strict"), default="fast_swing")
     parser.add_argument("--inspect", action="store_true")
     args = parser.parse_args()
     try:

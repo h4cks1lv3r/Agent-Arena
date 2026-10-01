@@ -282,12 +282,15 @@
     const job = state.server_job || serverJob;
     const jobActive = ["queued", "running"].includes(job?.status);
     const operationBusy = busy || jobActive;
-    const intraday = experiment.trading_style === "aggressive_intraday";
+    const swing = experiment.trading_style?.startsWith("fast_swing");
     $("trading-style-button").disabled = operationBusy || demo || !autonomousMode();
-    $("trading-style-button").textContent = intraday ? "Use balanced trading" : "Use aggressive intraday";
-    $("trading-style-detail").textContent = intraday
-      ? "Aggressive intraday: 1-minute AI reviews, exit checks about every 5 seconds, 30-minute maximum holds, and stock exits 10 minutes before session close. Existing risk and API budget limits apply."
-      : "Balanced trading permits longer holds. Switch to intraday for faster reviews and enforced short holding times.";
+    $("trading-style-button").textContent = swing ? "Use balanced trading" : "Use fast overnight trading";
+    $("trading-style-detail").textContent = swing
+      ? "Fast overnight: 1-minute AI reviews and local checks about every 5 seconds. Routine exits wait for the next trading session. Protective exits use a conservative three-round-trip capacity over five broker sessions. Existing risk and API budget limits apply."
+      : "Balanced trading permits longer holds. Fast overnight trading reviews opportunities quickly while avoiding routine same-day stock round trips.";
+    $("strict-swing-row").hidden = !swing;
+    $("strict-swing-toggle").checked = experiment.trading_style === "fast_swing_strict";
+    $("strict-swing-toggle").disabled = operationBusy;
     $("resume-button").disabled = operationBusy || experiment.status === "ready";
     $("halt-button").disabled = haltBusy || experiment.status === "halted";
     $("demo-button").disabled = busy || !demo || experiment.status !== "ready";
@@ -613,7 +616,7 @@
   function exitMarkup(exits) {
     const entries = Array.isArray(exits) ? exits : Object.entries(exits || {}).map(([symbol, exit]) => ({ symbol, ...exit }));
     if (!entries.length) return '<p class="small muted">No local exit plan recorded.</p>';
-    return `<div class="table-scroll"><table class="exit-table"><thead><tr><th>Symbol</th><th>Stop threshold</th><th>Profit threshold</th><th>Maximum holding time</th><th>Recorded rationale</th></tr></thead><tbody>${entries.map((exit) => `<tr><td><strong>${esc(exit.symbol)}</strong></td><td>${number(exit.stop_loss) > 0 ? money(exit.stop_loss) : "Not set"}</td><td>${number(exit.take_profit) > 0 ? money(exit.take_profit) : "Not set"}</td><td>${number(exit.max_hold_hours) > 0 ? `${qty(exit.max_hold_hours)} hours` : "Not set"}${exit.opened_at ? `<small>Opened ${esc(timestamp(exit.opened_at, true))}</small>` : ""}</td><td class="exit-reason">${esc(exit.reason || "No rationale recorded.")}</td></tr>`).join("")}</tbody></table></div>`;
+    return `<div class="table-scroll"><table class="exit-table"><thead><tr><th>Symbol</th><th>Stop threshold</th><th>Profit threshold</th><th>Exit timing</th><th>Recorded rationale</th></tr></thead><tbody>${entries.map((exit) => `<tr><td><strong>${esc(exit.symbol)}</strong></td><td>${number(exit.stop_loss) > 0 ? money(exit.stop_loss) : "Not set"}</td><td>${number(exit.take_profit) > 0 ? money(exit.take_profit) : "Not set"}</td><td>${exit.exit_after_purchase_day ? "Next trading session" : number(exit.max_hold_hours) > 0 ? `${qty(exit.max_hold_hours)} hours` : "Not set"}${exit.opened_at ? `<small>Opened ${esc(timestamp(exit.opened_at, true))}</small>` : ""}</td><td class="exit-reason">${esc(exit.reason || "No rationale recorded.")}</td></tr>`).join("")}</tbody></table></div>`;
   }
 
   function exitRetryMarkup(agentId) {
@@ -652,7 +655,7 @@
 
   function syncTradingStyleForm(preset = false) {
     const form = $("config-form");
-    const intraday = form.elements.namedItem("trading_style").value === "aggressive_intraday";
+    const intraday = form.elements.namedItem("trading_style").value !== "balanced";
     form.elements.namedItem("cycle_minutes").min = intraday ? "1" : "15";
     form.elements.namedItem("max_cycles_per_day").max = intraday ? "1440" : "24";
     if (preset) {
@@ -780,8 +783,11 @@
   window.addEventListener("hashchange", () => setView(location.hash.slice(1)));
   $("refresh-button").addEventListener("click", () => authenticated ? refresh() : connectSession());
   $("trading-style-button").addEventListener("click", () => mutate("/api/trading-style",
-    { style: state.experiment.trading_style === "aggressive_intraday" ? "balanced" : "aggressive_intraday" },
+    { style: state.experiment.trading_style?.startsWith("fast_swing") ? "balanced" : "fast_swing" },
     "Trading style updated. Existing positions, history, risk caps and model budget were retained.", true));
+  $("strict-swing-toggle").addEventListener("change", (event) => mutate("/api/trading-style",
+    { style: event.target.checked ? "fast_swing_strict" : "fast_swing" },
+    "Same-day exit policy updated. Strict mode also blocks protective stops until a later trading session.", true));
   $("resume-button").addEventListener("click", () => mutate("/api/resume", {}, "New entries enabled. The next demo or paper cycle can evaluate the strategy."));
   $("halt-button").addEventListener("click", haltIndependently);
   $("demo-button").addEventListener("click", () => mutate("/api/demo", { count: Number($("demo-count").value) }, "Synthetic sessions recorded. No AI or broker calls were made."));

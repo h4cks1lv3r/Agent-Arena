@@ -97,10 +97,10 @@ def _config(raw, base=None):
         raise EngineError("Mode must be demo or paper.")
     if cfg["agent_mode"] not in ("autonomous", "reviewer"):
         raise EngineError("Agent mode must be autonomous or reviewer.")
-    if cfg["trading_style"] not in ("balanced", "aggressive_intraday"):
+    if cfg["trading_style"] not in ("balanced", "aggressive_intraday", "fast_swing", "fast_swing_strict"):
         raise EngineError("Choose balanced or aggressive intraday trading.")
-    if cfg["trading_style"] == "aggressive_intraday" and cfg["agent_mode"] != "autonomous":
-        raise EngineError("Aggressive intraday trading requires autonomous agents.")
+    if cfg["trading_style"] in ("aggressive_intraday", "fast_swing", "fast_swing_strict") and cfg["agent_mode"] != "autonomous":
+        raise EngineError("Fast trading trading requires autonomous agents.")
     if cfg["asset_scope"] not in ("equities", "equities_crypto"):
         raise EngineError("Choose equities or equities and USD crypto.")
     if cfg["agent_mode"] == "reviewer" and cfg["asset_scope"] != "equities":
@@ -108,8 +108,8 @@ def _config(raw, base=None):
     for key in ("compound_profits", "loss_limit_includes_model_costs", "auto_resume"):
         if not isinstance(cfg[key], bool):
             raise EngineError(f"{key} must be true or false.")
-    for key, low, high in (("research_rounds", 1, 5), ("cycle_minutes", 1 if cfg["trading_style"] == "aggressive_intraday" else 15, 1440),
-                           ("max_cycles_per_day", 1, 1440 if cfg["trading_style"] == "aggressive_intraday" else 24), ("max_orders_per_cycle", 1, 10),
+    for key, low, high in (("research_rounds", 1, 5), ("cycle_minutes", 1 if cfg["trading_style"] in ("aggressive_intraday", "fast_swing", "fast_swing_strict") else 15, 1440),
+                           ("max_cycles_per_day", 1, 1440 if cfg["trading_style"] in ("aggressive_intraday", "fast_swing", "fast_swing_strict") else 24), ("max_orders_per_cycle", 1, 10),
                            ("output_token_limit", 1024, 16384)):
         value = cfg[key]
         if isinstance(value, bool) or not isinstance(value, int) or not low <= value <= high:
@@ -665,16 +665,16 @@ class Engine:
     def set_trading_style(self, style, model_budget=None):
         """Change execution pace without resetting history, positions or risk caps."""
         with self._write():
-            raw = {"trading_style": style, "cycle_minutes": 1 if style == "aggressive_intraday" else 60,
-                   "max_cycles_per_day": 390 if style == "aggressive_intraday" else 24}
+            raw = {"trading_style": style, "cycle_minutes": 1 if style in ("aggressive_intraday", "fast_swing", "fast_swing_strict") else 60,
+                   "max_cycles_per_day": 390 if style in ("aggressive_intraday", "fast_swing", "fast_swing_strict") else 24}
             if model_budget is not None:
                 raw["monthly_model_budget"] = model_budget
             cfg = _config(raw, self._get_config())
             exp = self._state["experiment"]
             exp["trading_style"] = cfg["trading_style"]
             exp["monthly_model_budget"] = cfg["monthly_model_budget"]
-            exp["cycle_minutes"] = 1 if style == "aggressive_intraday" else 60
-            exp["max_cycles_per_day"] = 390 if style == "aggressive_intraday" else 24
+            exp["cycle_minutes"] = 1 if style in ("aggressive_intraday", "fast_swing", "fast_swing_strict") else 60
+            exp["max_cycles_per_day"] = 390 if style in ("aggressive_intraday", "fast_swing", "fast_swing_strict") else 24
             self._event("Trading style changed by operator: " + style + ". Existing risk caps and history retained.")
         return self.snapshot()
 

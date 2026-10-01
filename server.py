@@ -482,7 +482,7 @@ def main():
                 service.engine.event('Automatic cycle scheduling failed; no order retry was made.', 'error')
 
     def monitor():
-        while not stop.wait(5 if service.engine.snapshot()['experiment'].get('trading_style') == 'aggressive_intraday' else 15):
+        while not stop.wait(5 if service.engine.snapshot()['experiment'].get('trading_style') in ('aggressive_intraday', 'fast_swing', 'fast_swing_strict') else 15):
             try:
                 service.monitor()
             except Exception:

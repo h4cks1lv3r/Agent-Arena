@@ -17,7 +17,7 @@ from .operation_guard import OperationCanceled, ensure_current_operation, operat
 
 UTC = dt.timezone.utc
 SYMBOLS = ('SPY', 'QQQ', 'IWM')
-VERSION = '0.7.0'
+VERSION = '0.7.1'
 
 class QuoteUnavailable(ValueError):
     """An execution quote is unavailable; other research and read work may continue."""
@@ -129,7 +129,7 @@ class Service:
                 autonomy[agent['id']]['exit_retries'] = self._get(self._exit_retry_key(agent['id']), {})
                 autonomy[agent['id']]['last_provider_model'] = self._get(f"provider_model:{state['experiment']['id']}:{agent['id']}")
         with self.cache_lock:
-            self._monitor['refresh_seconds'] = 5 if state['experiment'].get('trading_style') == 'aggressive_intraday' else 15
+            self._monitor['refresh_seconds'] = 5 if state['experiment'].get('trading_style') in ('aggressive_intraday', 'fast_swing', 'fast_swing_strict') else 15
             self._cache = {'experiment': state['experiment']['id'], 'autonomy': autonomy, 'model_spend_month': round(spend, 6)}
             self._snapshot_at = now().isoformat()
 
@@ -307,6 +307,13 @@ class Service:
         if state['experiment'].get('trading_style') == 'aggressive_intraday':
             from .intraday import effective_exit, policy
             state['trading_policy'] = policy()
+            for agent in state['agents']:
+                activity = state['autonomy'].setdefault(agent['id'], {})
+                activity['effective_exits'] = {symbol: effective_exit(activity.get('exits', {}).get(symbol, {}), position)
+                                               for symbol, position in agent['positions'].items()}
+        if state['experiment'].get('trading_style', '').startswith('fast_swing'):
+            from .swing import effective_exit, policy
+            state['trading_policy'] = policy(state['experiment']['trading_style'])
             for agent in state['agents']:
                 activity = state['autonomy'].setdefault(agent['id'], {})
                 activity['effective_exits'] = {symbol: effective_exit(activity.get('exits', {}).get(symbol, {}), position)
@@ -637,7 +644,7 @@ class Service:
                     self.engine.note_recovery(agent['id'], {'quote_warning': str(exc)[:600]})
             self._finish_startup_recovery(successes)
             current_exp = self.engine.snapshot()['experiment']
-            if (current_exp.get('trading_style') == 'aggressive_intraday' and current_exp.get('autopilot')
+            if (current_exp.get('trading_style') in ('aggressive_intraday', 'fast_swing', 'fast_swing_strict') and current_exp.get('autopilot')
                     and current_exp['status'] == 'ready' and not self.check_stop()):
                 for agent in self.engine.snapshot()['agents']:
                     if agent['id'] not in successes or self._agent_paused(agent['id']):
@@ -886,7 +893,19 @@ class Service:
         if clock.get('next_close') and (parse_time(clock['next_close']).astimezone(UTC) - checked_at).total_seconds() < 90:
             raise ExecutionDeferred('Too close to the session close to submit a new paper order safely.')
 
-    def _submit(self, agent, symbol, side, price, decision_id=None, *, notional=None, qty=None, automatic=False):
+    def _swing_order_gate(self, agent, broker, symbol, side, current, protective):
+        from .swing import check_order, session_dates
+        today = ny_time(now()).date()
+        key = 'swing_calendar:' + today.isoformat()
+        sessions = self._get(key)
+        if sessions is None:
+            sessions = session_dates(broker.calendar((today - dt.timedelta(days=30)).isoformat(), today.isoformat()), today)
+            self._put(key, sessions)
+        result = check_order(broker.orders(status='all'), current['positions'], sessions, now(), symbol, side,
+                             protective=protective, strict=self.engine.snapshot()['experiment']['trading_style'] == 'fast_swing_strict')
+        self._put('swing_guard:' + agent['id'], result)
+
+    def _submit(self, agent, symbol, side, price, decision_id=None, *, notional=None, qty=None, automatic=False, protective=False):
         ensure_current_operation(self)
         if side == 'sell' and automatic and self._exit_retry_blocked(agent['id'], symbol):
             return
@@ -920,12 +939,17 @@ class Service:
         state = self.engine.snapshot()
         exp = state['experiment']
         current = next(a for a in state['agents'] if a['id'] == agent['id'])
+        if exp.get('trading_style', '').startswith('fast_swing') and not crypto:
+            try:
+                self._swing_order_gate(agent, broker, symbol, side, current, protective)
+            except (ValueError, KeyError, TypeError, OverflowError) as exc:
+                raise ExecutionDeferred('Short-swing order deferred: ' + str(exc)) from None
         if side == 'buy':
             # Small headroom for fee estimates and quote movement; no borrowing.
             amount = notional if notional is not None else math.floor(self._entry_capacity(agent['id'], symbol, price) * 100) / 100
             if amount < 1:
                 return
-            if exp.get('trading_style') == 'aggressive_intraday':
+            if exp.get('trading_style') in ('aggressive_intraday', 'fast_swing', 'fast_swing_strict'):
                 from .intraday import check_entry
                 try:
                     check_entry(broker.account(), quote, amount, clock, now(), crypto=crypto)
@@ -1258,11 +1282,17 @@ class Service:
         if self.engine.snapshot()['experiment']['status'] != 'ready':
             return
         pending_symbols = {o['symbol'] for o in self.engine.pending_orders() if o['agent_id'] == agent['id']}
-        intraday = self.engine.snapshot()['experiment'].get('trading_style') == 'aggressive_intraday'
+        style = self.engine.snapshot()['experiment'].get('trading_style')
+        intraday = style == 'aggressive_intraday'
+        swing = style in ('fast_swing', 'fast_swing_strict')
         rules = dict(memory.get('exits', {}))
-        clock = broker.clock() if intraday else None
+        clock = broker.clock() if intraday or swing else None
         if intraday:
             from .intraday import effective_exit, session_close_due
+            for symbol, position in positions.items():
+                rules[symbol] = effective_exit(rules.get(symbol, {}), position)
+        if swing:
+            from .swing import effective_exit, next_session_due
             for symbol, position in positions.items():
                 rules[symbol] = effective_exit(rules.get(symbol, {}), position)
         for symbol, rule in rules.items():
@@ -1275,18 +1305,27 @@ class Service:
                 buy_orders = [o for o in self.engine.snapshot()['orders'] if o['agent_id'] == agent['id'] and o['symbol'] == symbol and o['side'] == 'buy' and o['filled_qty'] > 0]
                 opened = min((o['created_at'] for o in buy_orders), default=now().isoformat())
             reason = None
-            if intraday and session_close_due(symbol, clock, now()):
+            protective = False
+            if swing and rule.get('stop_loss', 0) > 0 and prices[symbol] <= rule['stop_loss']:
+                reason = 'Agent-defined local stop-loss threshold reached.'
+                protective = True
+            elif swing and next_session_due(position, clock, now()):
+                reason = 'Short-swing next-session exit: rotate capital after the purchase trading day.'
+            elif intraday and session_close_due(symbol, clock, now()):
                 reason = 'Intraday session-close exit: flatten before the broker closing time.'
             elif rule.get('stop_loss', 0) > 0 and prices[symbol] <= rule['stop_loss']:
                 reason = 'Agent-defined local stop-loss threshold reached.'
+                protective = True
             elif rule.get('take_profit', 0) > 0 and prices[symbol] >= rule['take_profit']:
                 reason = 'Agent-defined local take-profit threshold reached.'
             elif rule.get('max_hold_hours', 0) > 0 and (now() - parse_time(opened).astimezone(UTC)).total_seconds() >= rule['max_hold_hours'] * 3600:
                 reason = 'Agent-defined maximum holding time reached.'
+            if reason and swing and not protective and not next_session_due(position, clock, now()):
+                continue  # Profit/timer exits cannot close a newly purchased stock today.
             if reason:
                 decision = self.engine.record_decision(agent['id'], {'action': 'sell', 'symbol': symbol, 'reason': reason, 'status': 'agent_exit_trigger', 'exit_rule': rule, 'recorded_before_order': True})
                 try:
-                    self._submit(agent, symbol, 'sell', prices[symbol], decision['id'], qty=position['qty'], automatic=True)
+                    self._submit(agent, symbol, 'sell', prices[symbol], decision['id'], qty=position['qty'], automatic=True, protective=protective)
                 except ExecutionDeferred as exc:
                     self._isolate_failure(agent, exc)
 
@@ -1315,7 +1354,7 @@ class Service:
                 local = ny_time(stamp)
                 stock_window = bool(clock.get('is_open') and (9, 45) <= (local.hour, local.minute) < (15, 45)
                                     and (not clock.get('next_close') or (parse_time(clock['next_close']).astimezone(UTC) - now()).total_seconds() >= 90))
-                if (marked.get('trading_style') == 'aggressive_intraday'
+                if (marked.get('trading_style') in ('aggressive_intraday', 'fast_swing', 'fast_swing_strict')
                         and marked.get('asset_scope', 'equities') == 'equities' and not stock_window):
                     continue
                 memory = self._get(self._autonomy_key(agent['id']), {})
@@ -1375,7 +1414,7 @@ class Service:
                         if deferred:
                             memory['status'] = 'stock_ideas_deferred_until_new_session_review'
                             self._record_autonomy(agent['id'], memory)
-                        delay = exp['cycle_minutes'] if exp.get('trading_style') == 'aggressive_intraday' else max(exp['cycle_minutes'], run['plan']['review_minutes'])
+                        delay = exp['cycle_minutes'] if exp.get('trading_style') in ('aggressive_intraday', 'fast_swing', 'fast_swing_strict') else max(exp['cycle_minutes'], run['plan']['review_minutes'])
                         next_due = now() + dt.timedelta(minutes=delay)
                         if deferred and clock.get('next_open'):
                             # Schedule a fresh research turn in the next equity

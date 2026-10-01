@@ -1,3 +1,10 @@
+# Agent Arena server 0.7.1
+
+- Add fast overnight trading in place of the dashboard intraday shortcut: retain one-minute reviews and five-second local checks, with routine stock exits deferred until a later purchase-day trading session. Remove the forced 30-minute and pre-close exits from this profile.
+- Reject pyramiding and same-day stock re-entry. Read full broker order history and the actual five-session calendar before orders. Reserve a conservative three-round-trip capacity for protective stops; strict mode also blocks same-day protective exits.
+- Preserve the experiment, allocations, risk caps, paid-model budget and existing automation preferences. Existing Android clients load the dashboard update.
+- Read SHORT_SWING.md and VALIDATION_v0.7.1.md. The prior intraday profile remains an explicit backend compatibility option and is not the active policy.
+
 # Agent Arena server 0.7.0
 
 - Add an in-place aggressive intraday profile: one-minute AI reviews, completed minute-bar research, local exit checks about every five seconds, a 30-minute holding cap, and stock exits requested ten minutes before the broker close.
