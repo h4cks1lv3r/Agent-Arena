@@ -75,7 +75,7 @@ def _defaults():
         "mode": "demo", "total_capital": 500, "target": 10000,
         "loss_limit": 50, "position_cap_pct": 30, "exposure_cap_pct": 60,
         "slippage_bps": 5, "fee_bps": 1, "monthly_model_budget": 0,
-        "agent_mode": "autonomous", "asset_scope": "equities", "research_rounds": 3, "cycle_minutes": 60,
+        "agent_mode": "autonomous", "trading_style": "balanced", "asset_scope": "equities", "research_rounds": 3, "cycle_minutes": 60,
         "max_cycles_per_day": 24, "max_orders_per_cycle": 3, "compound_profits": True,
         "loss_limit_includes_model_costs": False, "auto_resume": True, "output_token_limit": 8192,
         "agents": [
@@ -97,6 +97,10 @@ def _config(raw, base=None):
         raise EngineError("Mode must be demo or paper.")
     if cfg["agent_mode"] not in ("autonomous", "reviewer"):
         raise EngineError("Agent mode must be autonomous or reviewer.")
+    if cfg["trading_style"] not in ("balanced", "aggressive_intraday"):
+        raise EngineError("Choose balanced or aggressive intraday trading.")
+    if cfg["trading_style"] == "aggressive_intraday" and cfg["agent_mode"] != "autonomous":
+        raise EngineError("Aggressive intraday trading requires autonomous agents.")
     if cfg["asset_scope"] not in ("equities", "equities_crypto"):
         raise EngineError("Choose equities or equities and USD crypto.")
     if cfg["agent_mode"] == "reviewer" and cfg["asset_scope"] != "equities":
@@ -104,8 +108,8 @@ def _config(raw, base=None):
     for key in ("compound_profits", "loss_limit_includes_model_costs", "auto_resume"):
         if not isinstance(cfg[key], bool):
             raise EngineError(f"{key} must be true or false.")
-    for key, low, high in (("research_rounds", 1, 5), ("cycle_minutes", 15, 1440),
-                           ("max_cycles_per_day", 1, 24), ("max_orders_per_cycle", 1, 10),
+    for key, low, high in (("research_rounds", 1, 5), ("cycle_minutes", 1 if cfg["trading_style"] == "aggressive_intraday" else 15, 1440),
+                           ("max_cycles_per_day", 1, 1440 if cfg["trading_style"] == "aggressive_intraday" else 24), ("max_orders_per_cycle", 1, 10),
                            ("output_token_limit", 1024, 16384)):
         value = cfg[key]
         if isinstance(value, bool) or not isinstance(value, int) or not low <= value <= high:
@@ -196,6 +200,7 @@ class Engine:
             experiment.setdefault("agent_mode", "reviewer")
             # A server update never broadens an existing account's trading scope.
             experiment.setdefault("asset_scope", "equities")
+            experiment.setdefault("trading_style", "balanced")
             experiment.setdefault("compound_profits", False)
             for key in ("research_rounds", "cycle_minutes", "max_cycles_per_day", "max_orders_per_cycle"):
                 experiment.setdefault(key, _defaults()[key])
@@ -656,6 +661,22 @@ class Engine:
                 archived = json.loads(row[0])["experiment"]
                 result["archives"].append({key: archived[key] for key in ("id", "created_at", "mode", "total_capital")})
             return result
+
+    def set_trading_style(self, style, model_budget=None):
+        """Change execution pace without resetting history, positions or risk caps."""
+        with self._write():
+            raw = {"trading_style": style, "cycle_minutes": 1 if style == "aggressive_intraday" else 60,
+                   "max_cycles_per_day": 390 if style == "aggressive_intraday" else 24}
+            if model_budget is not None:
+                raw["monthly_model_budget"] = model_budget
+            cfg = _config(raw, self._get_config())
+            exp = self._state["experiment"]
+            exp["trading_style"] = cfg["trading_style"]
+            exp["monthly_model_budget"] = cfg["monthly_model_budget"]
+            exp["cycle_minutes"] = 1 if style == "aggressive_intraday" else 60
+            exp["max_cycles_per_day"] = 390 if style == "aggressive_intraday" else 24
+            self._event("Trading style changed by operator: " + style + ". Existing risk caps and history retained.")
+        return self.snapshot()
 
     def configure(self, config):
         with self._write():

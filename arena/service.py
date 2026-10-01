@@ -17,7 +17,7 @@ from .operation_guard import OperationCanceled, ensure_current_operation, operat
 
 UTC = dt.timezone.utc
 SYMBOLS = ('SPY', 'QQQ', 'IWM')
-VERSION = '0.6.1'
+VERSION = '0.7.0'
 
 class QuoteUnavailable(ValueError):
     """An execution quote is unavailable; other research and read work may continue."""
@@ -129,6 +129,7 @@ class Service:
                 autonomy[agent['id']]['exit_retries'] = self._get(self._exit_retry_key(agent['id']), {})
                 autonomy[agent['id']]['last_provider_model'] = self._get(f"provider_model:{state['experiment']['id']}:{agent['id']}")
         with self.cache_lock:
+            self._monitor['refresh_seconds'] = 5 if state['experiment'].get('trading_style') == 'aggressive_intraday' else 15
             self._cache = {'experiment': state['experiment']['id'], 'autonomy': autonomy, 'model_spend_month': round(spend, 6)}
             self._snapshot_at = now().isoformat()
 
@@ -162,6 +163,21 @@ class Service:
                 if generation != self._control_generation or self.check_stop():
                     raise ValueError('A stop was requested during reconciliation; resume was canceled.')
                 self.engine.resume_agent(agent_id, require_reconciled=state['experiment']['mode'] == 'paper')
+        return self.public_state()
+
+    def set_trading_style(self, body):
+        if not isinstance(body, dict) or set(body) - {"style", "monthly_model_budget"} or "style" not in body:
+            raise ValueError("Supply a trading style and an optional model budget.")
+        with self.control_lock:
+            ensure_current_operation(self)
+            self.engine.set_trading_style(body["style"], body.get("monthly_model_budget"))
+            for agent in self.engine.snapshot()["agents"]:
+                key = self._autonomy_key(agent["id"])
+                memory = self._get(key, {})
+                memory.pop("next_due", None)
+                memory.pop("deferred_equity_ideas", None)
+                self._put(key, memory)
+        self._refresh_cache()
         return self.public_state()
 
     def _retry_due(self, agent_id):
@@ -288,6 +304,13 @@ class Service:
             agent['target_equity'] = state['experiment']['target'] * agent['allocation'] / state['experiment']['total_capital']
         state['model_spend_month'] = cache['model_spend_month']
         state['autonomy'] = cache['autonomy'] if cache['experiment'] == state['experiment']['id'] else {}
+        if state['experiment'].get('trading_style') == 'aggressive_intraday':
+            from .intraday import effective_exit, policy
+            state['trading_policy'] = policy()
+            for agent in state['agents']:
+                activity = state['autonomy'].setdefault(agent['id'], {})
+                activity['effective_exits'] = {symbol: effective_exit(activity.get('exits', {}).get(symbol, {}), position)
+                                               for symbol, position in agent['positions'].items()}
         state['server_time'] = now().isoformat()
         state['snapshot_at'] = max(state.get('snapshot_at', ''), metadata_at)
         monitor['busy'] = self._busy.is_set() or self._monitor_busy.is_set()
@@ -582,7 +605,7 @@ class Service:
         return result
 
     def monitor(self):
-        """Observe accounts and held quotes only. No model requests or orders."""
+        """Observe accounts/quotes; intraday automation also checks stored local exits."""
         if not self.lock.acquire(blocking=False):
             return self._monitor_quotes_while_busy()
         self._monitor_busy.set()
@@ -613,6 +636,16 @@ class Service:
                     errors[agent['id']] = str(exc)[:600]
                     self.engine.note_recovery(agent['id'], {'quote_warning': str(exc)[:600]})
             self._finish_startup_recovery(successes)
+            current_exp = self.engine.snapshot()['experiment']
+            if (current_exp.get('trading_style') == 'aggressive_intraday' and current_exp.get('autopilot')
+                    and current_exp['status'] == 'ready' and not self.check_stop()):
+                for agent in self.engine.snapshot()['agents']:
+                    if agent['id'] not in successes or self._agent_paused(agent['id']):
+                        continue
+                    try:
+                        self._run_agent_exits(agent, self.broker(agent))
+                    except (ApiError, ValueError, KeyError, TypeError, OverflowError) as exc:
+                        errors[agent['id']] = self._isolate_failure(agent, exc)
             with self.cache_lock:
                 if successes:
                     self._monitor['last_success'] = now().isoformat()
@@ -892,6 +925,12 @@ class Service:
             amount = notional if notional is not None else math.floor(self._entry_capacity(agent['id'], symbol, price) * 100) / 100
             if amount < 1:
                 return
+            if exp.get('trading_style') == 'aggressive_intraday':
+                from .intraday import check_entry
+                try:
+                    check_entry(broker.account(), quote, amount, clock, now(), crypto=crypto)
+                except (ValueError, KeyError, TypeError, OverflowError) as exc:
+                    raise ExecutionDeferred("Intraday entry deferred: " + str(exc)) from None
             with self.control_lock:
                 ensure_current_operation(self)
                 order = self.engine.reserve_order(agent['id'], symbol, side, price, notional=amount, decision_id=decision_id)
@@ -1219,7 +1258,14 @@ class Service:
         if self.engine.snapshot()['experiment']['status'] != 'ready':
             return
         pending_symbols = {o['symbol'] for o in self.engine.pending_orders() if o['agent_id'] == agent['id']}
-        for symbol, rule in memory.get('exits', {}).items():
+        intraday = self.engine.snapshot()['experiment'].get('trading_style') == 'aggressive_intraday'
+        rules = dict(memory.get('exits', {}))
+        clock = broker.clock() if intraday else None
+        if intraday:
+            from .intraday import effective_exit, session_close_due
+            for symbol, position in positions.items():
+                rules[symbol] = effective_exit(rules.get(symbol, {}), position)
+        for symbol, rule in rules.items():
             if symbol not in positions or symbol in pending_symbols or symbol not in prices or self._exit_retry_blocked(agent['id'], symbol):
                 continue
             position = positions[symbol]
@@ -1229,7 +1275,9 @@ class Service:
                 buy_orders = [o for o in self.engine.snapshot()['orders'] if o['agent_id'] == agent['id'] and o['symbol'] == symbol and o['side'] == 'buy' and o['filled_qty'] > 0]
                 opened = min((o['created_at'] for o in buy_orders), default=now().isoformat())
             reason = None
-            if rule.get('stop_loss', 0) > 0 and prices[symbol] <= rule['stop_loss']:
+            if intraday and session_close_due(symbol, clock, now()):
+                reason = 'Intraday session-close exit: flatten before the broker closing time.'
+            elif rule.get('stop_loss', 0) > 0 and prices[symbol] <= rule['stop_loss']:
                 reason = 'Agent-defined local stop-loss threshold reached.'
             elif rule.get('take_profit', 0) > 0 and prices[symbol] >= rule['take_profit']:
                 reason = 'Agent-defined local take-profit threshold reached.'
@@ -1267,6 +1315,9 @@ class Service:
                 local = ny_time(stamp)
                 stock_window = bool(clock.get('is_open') and (9, 45) <= (local.hour, local.minute) < (15, 45)
                                     and (not clock.get('next_close') or (parse_time(clock['next_close']).astimezone(UTC) - now()).total_seconds() >= 90))
+                if (marked.get('trading_style') == 'aggressive_intraday'
+                        and marked.get('asset_scope', 'equities') == 'equities' and not stock_window):
+                    continue
                 memory = self._get(self._autonomy_key(agent['id']), {})
                 if memory.get('next_due') and parse_time(memory['next_due']).astimezone(UTC) > now():
                     continue
@@ -1291,6 +1342,7 @@ class Service:
                 snapshot = {
                     'at': stamp.isoformat(), 'mode': 'paper',
                     'goal': {'initial_capital': agent['allocation'], 'target_equity': exp['target'] * agent['allocation'] / exp['total_capital'], 'objective': 'Independently maximize own net equity growth as quickly as possible within the fixed risk and budget limits, toward the assigned target. Speed never overrides limits. No deadline or guaranteed return.'},
+                    'trading_policy': self.public_state().get('trading_policy', {'style': 'balanced'}),
                     'portfolio': {k: current[k] for k in ('allocation', 'cash', 'available_cash', 'equity', 'positions', 'fees', 'model_cost', 'net_pnl')},
                     'working_orders': [{k: o[k] for k in ('symbol', 'side', 'notional', 'qty', 'status', 'reserved')} for o in self.engine.pending_orders() if o['agent_id'] == agent['id']],
                     'recent_fills': [{k: o[k] for k in ('symbol', 'side', 'filled_qty', 'filled_avg_price', 'estimated_fees', 'updated_at')} for o in self.engine.snapshot()['orders'] if o['agent_id'] == agent['id'] and o['filled_qty'] > 0][-10:],
@@ -1323,7 +1375,7 @@ class Service:
                         if deferred:
                             memory['status'] = 'stock_ideas_deferred_until_new_session_review'
                             self._record_autonomy(agent['id'], memory)
-                        delay = max(exp['cycle_minutes'], run['plan']['review_minutes'])
+                        delay = exp['cycle_minutes'] if exp.get('trading_style') == 'aggressive_intraday' else max(exp['cycle_minutes'], run['plan']['review_minutes'])
                         next_due = now() + dt.timedelta(minutes=delay)
                         if deferred and clock.get('next_open'):
                             # Schedule a fresh research turn in the next equity
@@ -1430,6 +1482,8 @@ class Service:
                 with self.control_lock:
                     ensure_current_operation(self)
                     self.engine.configure(body)
+            elif route == '/api/trading-style':
+                return self.set_trading_style(body)
             elif route == '/api/new':
                 self.new_experiment(body)
             elif route == '/api/demo':

@@ -1,10 +1,10 @@
-# Agent Arena v0.6.1 — stocks, 24/7 crypto, Android and web
+# Agent Arena server v0.7.0 — aggressive intraday, Android and web
 
 Each configured AI agent can research eligible assets, develop and revise its own strategy, choose buys/sells/holds and trade sizes, and set exit conditions. The fixed SMA strategy remains only as an optional rules baseline. Fresh experiments now start with two independent strategists: Astra and Claude. The $500 total is split into $250 each. Existing experiments retain their saved roster and settings.
 
 This is a local application that must keep running. It cannot run from a chat message. This release has **paper trading only**, no deposits, no live broker route, and no demonstrated profitable strategy. The $500 total and $10,000 target are experiment settings. A 20× return is a goal, not an expected outcome.
 
-Read **CRYPTO_V0.6.0.md** and **WINDOWS_UPDATE.md**. Version 0.6.1 combines the v0.5.2 order-history cursor recovery with 24/7 USD crypto and after-hours stock research. Existing experiments retain their saved asset scope, positions and audit history.
+Read **AGGRESSIVE_INTRADAY.md** for the optional short-hold mode and **VALIDATION_v0.7.0.md** for its checks. The existing Android client loads this server/dashboard update; no new APK is required. Also read **CRYPTO_V0.6.0.md** and **WINDOWS_UPDATE.md**. Version 0.6.1 combines the v0.5.2 order-history cursor recovery with 24/7 USD crypto and after-hours stock research. Existing experiments retain their saved asset scope, positions and audit history.
 
 ## Android and shared web dashboard
 

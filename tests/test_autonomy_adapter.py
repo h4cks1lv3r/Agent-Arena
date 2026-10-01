@@ -174,7 +174,7 @@ class AutonomousSchemaTests(unittest.TestCase):
 
     def test_bounds_are_enforced_independently_of_provider(self):
         variants = []
-        for interval in (14, 1441, True, 15.5):
+        for interval in (0, 1441, True, 15.5):
             value = plan()
             value["review_minutes"] = interval
             variants.append(value)

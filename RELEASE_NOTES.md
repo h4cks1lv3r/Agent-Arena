@@ -1,3 +1,11 @@
+# Agent Arena server 0.7.0
+
+- Add an in-place aggressive intraday profile: one-minute AI reviews, completed minute-bar research, local exit checks about every five seconds, a 30-minute holding cap, and stock exits requested ten minutes before the broker close.
+- Keep existing allocation, loss/exposure caps, credentials, audit history and paid-model budget. Existing positions receive the short holding cap when the profile is enabled.
+- Read fresh broker cash, buying power and account restrictions before every intraday entry; reject wide spreads and entries near close. Existing halt, pause, freshness, reconciliation and order-recovery controls still apply.
+- Add a dashboard profile switch and a Windows upgrade helper with a verified full backup. Existing Android clients can use the updated dashboard; this release does not rebuild the APK.
+- Validation: 371 offline Python tests, dashboard JavaScript syntax and the jsdom recovery/control runtime check passed. Read AGGRESSIVE_INTRADAY.md and VALIDATION_v0.7.0.md.
+
 # Agent Arena 0.6.1
 
 - Combine the v0.5.2 complete-history cursor fallback with 24/7 USD crypto paper trading and after-hours stock research.

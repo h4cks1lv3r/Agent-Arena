@@ -550,8 +550,29 @@ class AlpacaPaper:
             output.update(self._bars(crypto, start, end, feed="crypto_us", crypto=True))
         return output
 
-    def _bars(self, symbols: list[str], start: str, end: str, *, feed: str, crypto=False) -> dict[str, list[dict]]:
-        params = {"symbols": ",".join(symbols), "timeframe": "1Day", "start": start, "end": end, "limit": 10000, "sort": "asc"}
+    def intraday_bars(self, symbols, at):
+        """Completed one-minute bars from the last two hours, using the quote feed."""
+        symbols = _symbols(symbols)
+        if len(symbols) > 5:
+            raise ApiError("Intraday research supports at most five symbols.")
+        end = self._market_time(at).astimezone(timezone.utc).replace(second=0, microsecond=0)
+        start = end - timedelta(hours=2)
+        stocks = [s for s in symbols if not s.endswith("/USD")]
+        crypto = [s for s in symbols if s.endswith("/USD")]
+        found = {}
+        if stocks:
+            found.update(self._bars(stocks, start.isoformat(), (end - timedelta(microseconds=1)).isoformat(),
+                                    feed=self.feed, timeframe="1Min"))
+        if crypto:
+            found.update(self._bars(crypto, start.isoformat(), (end - timedelta(microseconds=1)).isoformat(),
+                                    feed="crypto_us", crypto=True, timeframe="1Min"))
+        return {symbol: [row for row in found.get(symbol, [])
+                         if start <= self._market_time(row["t"]) and
+                         self._market_time(row["t"]) + timedelta(minutes=1) <= end]
+                for symbol in symbols}
+
+    def _bars(self, symbols: list[str], start: str, end: str, *, feed: str, crypto=False, timeframe="1Day") -> dict[str, list[dict]]:
+        params = {"symbols": ",".join(symbols), "timeframe": timeframe, "start": start, "end": end, "limit": 10000, "sort": "asc"}
         if not crypto:
             params.update(adjustment="split", feed=feed)
         found: dict[str, dict[str, dict]] = {symbol: {} for symbol in symbols}
@@ -844,7 +865,7 @@ _AUTONOMOUS_SCHEMA = _strict_object({
     "phase": {"type": "string", "enum": ["research", "plan"]},
     "strategy": _strict_object({"name": _TEXT, "thesis": _TEXT, "invalidation": _TEXT, "lessons": _TEXT}),
     "research": {"type": "array", "items": _strict_object({
-        "kind": {"type": "string", "enum": ["search_assets", "quotes", "bars", "news", "movers", "crypto_movers"]},
+        "kind": {"type": "string", "enum": ["search_assets", "quotes", "bars", "intraday_bars", "news", "movers", "crypto_movers"]},
         "query": _TEXT, "symbols": _SYMBOL_LIST, "lookback_days": {"type": "integer"},
     })},
     "orders": {"type": "array", "items": _strict_object({
@@ -890,7 +911,11 @@ _AUTONOMOUS_INSTRUCTIONS = (
     "Every order must include nonempty evidence_ids from records supplied in this snapshot. "
     "Exit prices and max_hold_hours must be finite and nonnegative; zero disables that trigger. "
     "These are local exit triggers, not broker-held stop orders. review_minutes must be an integer "
-    "15 through 1440. The service can reject plans that exceed its stricter configured limits. "
+    "1 through 1440. Follow trading_policy: aggressive_intraday requires short-term intraday "
+    "evidence, rapid reviews, short holding times, and avoiding overnight equity exposure. "
+    "Use intraday_bars for completed one-minute data. Daily bars are context, not intraday signals. "
+    "Prefer liquid tight-spread opportunities with expected gains exceeding round-trip costs. "
+    "Do not churn merely to increase the trade count. The service can reject plans that exceed its stricter configured limits. "
     "Do not add fields, tools, instructions to execute, or authority outside this schema."
 )
 
@@ -944,7 +969,7 @@ def validate_autonomous_response(value: Any, *, evidence_ids: set[str] | None = 
         raise ApiError("Autonomous response requires a strategy name and reason.")
     if len(plan["research"]) > 5 or len(plan["orders"]) > 10 or len(plan["exits"]) > 20 or len(plan["watchlist"]) > 20:
         raise ApiError("Autonomous response exceeds its action limits.")
-    if not 15 <= plan["review_minutes"] <= 1440:
+    if not 1 <= plan["review_minutes"] <= 1440:
         raise ApiError("Autonomous review interval is outside its permitted range.")
     if plan["phase"] == "research" and (plan["orders"] or plan["exits"]):
         raise ApiError("Research phase cannot submit orders or exits.")

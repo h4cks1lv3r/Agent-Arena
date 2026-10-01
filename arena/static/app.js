@@ -282,6 +282,12 @@
     const job = state.server_job || serverJob;
     const jobActive = ["queued", "running"].includes(job?.status);
     const operationBusy = busy || jobActive;
+    const intraday = experiment.trading_style === "aggressive_intraday";
+    $("trading-style-button").disabled = operationBusy || demo || !autonomousMode();
+    $("trading-style-button").textContent = intraday ? "Use balanced trading" : "Use aggressive intraday";
+    $("trading-style-detail").textContent = intraday
+      ? "Aggressive intraday: 1-minute AI reviews, exit checks about every 5 seconds, 30-minute maximum holds, and stock exits 10 minutes before session close. Existing risk and API budget limits apply."
+      : "Balanced trading permits longer holds. Switch to intraday for faster reviews and enforced short holding times.";
     $("resume-button").disabled = operationBusy || experiment.status === "ready";
     $("halt-button").disabled = haltBusy || experiment.status === "halted";
     $("demo-button").disabled = busy || !demo || experiment.status !== "ready";
@@ -639,21 +645,34 @@
       const manual = agent.provider === "manual";
       const [badge, badgeClass] = providerBadge(agent);
       const strategyDetails = isRules ? '<div class="strategy-fields"><div><span class="small-label">FIXED STRATEGY</span><p>SMA20/SMA50 long-only baseline on SPY, QQQ and IWM. Buy when the latest closed daily price is above SMA20 and SMA20 is above SMA50. Exit when price is below SMA50; otherwise hold. Allocation and risk controls still apply.</p></div><div><span class="small-label">PURPOSE</span><p>A fixed comparison strategy. It does not use model research and has no demonstrated advantage in this experiment.</p></div></div>' : manual ? '<p class="muted small">This agent does not run an automated strategy or submit model-generated orders.</p>' : `<h3 class="strategy-name">${esc(strategy.name || "No strategy recorded yet")}</h3><div class="strategy-fields">${[["THESIS", strategy.thesis], ["INVALIDATION", strategy.invalidation], ["LESSONS / MEMORY", strategy.lessons]].map(([label, value]) => `<div><span class="small-label">${label}</span><p>${esc(value || "Not recorded.")}</p></div>`).join("")}</div>`;
-      return `<section class="panel research-agent" data-research-agent="${esc(agent.id)}" style="--agent-color:${COLORS[index % COLORS.length]}"><div class="panel-heading"><div><span class="eyebrow">${esc(providerLabel(agent.provider))}</span><h2>${esc(agent.name)}</h2></div><span class="badge ${badgeClass}">${esc(badge)}</span></div>${strategyDetails}${!isRules && !manual ? `<dl class="research-schedule"><div><dt>Last cycle status</dt><dd>${esc(activity.status || "Not run")}</dd></div><div><dt>Last research cycle</dt><dd>${esc(timestamp(activity.last_cycle, true))}</dd></div><div><dt>Next scheduled review</dt><dd>${esc(timestamp(activity.next_due, true))}</dd></div><div><dt>Profit compounding</dt><dd>${state.experiment.compound_profits ? "Enabled" : "Disabled"}</dd></div></dl><div class="research-subsection"><h3>Watchlist</h3><div class="watchlist">${watchlist.length ? watchlist.map((symbol) => `<span>${esc(symbol)}</span>`).join("") : '<p class="small muted">No watchlist recorded.</p>'}</div></div><div class="research-subsection"><h3>Planned exit thresholds</h3><p class="small muted">Local triggers, not broker stop orders. They require this app and autopilot to run. Halting automation also stops these exits. A trigger does not guarantee a fill price.</p>${exitMarkup(activity.exits || activity.plan?.exits)}${exitRetryMarkup(agent.id)}</div><div class="research-subsection"><div class="subsection-heading"><h3>Model research & rationale</h3><span class="small muted">${turns.length} recorded turns</span></div>${turns.length ? turns.map((turn, turnIndex) => turnMarkup(turn, turnIndex, agent.id)).join("") : '<div class="empty-state">No prospective model responses recorded.</div>'}</div><div class="research-subsection"><div class="subsection-heading"><h3>Research evidence</h3><span class="small muted">${evidence.length} source records</span></div>${evidence.length ? evidence.map((record, evidenceIndex) => evidenceMarkup(record, evidenceIndex, agent.id)).join("") : '<div class="empty-state">No research records. Missing access is reported explicitly; it is never replaced with fabricated data.</div>'}</div>` : ""}</section>`;
+      return `<section class="panel research-agent" data-research-agent="${esc(agent.id)}" style="--agent-color:${COLORS[index % COLORS.length]}"><div class="panel-heading"><div><span class="eyebrow">${esc(providerLabel(agent.provider))}</span><h2>${esc(agent.name)}</h2></div><span class="badge ${badgeClass}">${esc(badge)}</span></div>${strategyDetails}${!isRules && !manual ? `<dl class="research-schedule"><div><dt>Last cycle status</dt><dd>${esc(activity.status || "Not run")}</dd></div><div><dt>Last research cycle</dt><dd>${esc(timestamp(activity.last_cycle, true))}</dd></div><div><dt>Next scheduled review</dt><dd>${esc(timestamp(activity.next_due, true))}</dd></div><div><dt>Profit compounding</dt><dd>${state.experiment.compound_profits ? "Enabled" : "Disabled"}</dd></div></dl><div class="research-subsection"><h3>Watchlist</h3><div class="watchlist">${watchlist.length ? watchlist.map((symbol) => `<span>${esc(symbol)}</span>`).join("") : '<p class="small muted">No watchlist recorded.</p>'}</div></div><div class="research-subsection"><h3>Planned exit thresholds</h3><p class="small muted">Local triggers, not broker stop orders. They require this app and autopilot to run. Halting automation also stops these exits. A trigger does not guarantee a fill price.</p>${exitMarkup(activity.effective_exits || activity.exits || activity.plan?.exits)}${exitRetryMarkup(agent.id)}</div><div class="research-subsection"><div class="subsection-heading"><h3>Model research & rationale</h3><span class="small muted">${turns.length} recorded turns</span></div>${turns.length ? turns.map((turn, turnIndex) => turnMarkup(turn, turnIndex, agent.id)).join("") : '<div class="empty-state">No prospective model responses recorded.</div>'}</div><div class="research-subsection"><div class="subsection-heading"><h3>Research evidence</h3><span class="small muted">${evidence.length} source records</span></div>${evidence.length ? evidence.map((record, evidenceIndex) => evidenceMarkup(record, evidenceIndex, agent.id)).join("") : '<div class="empty-state">No research records. Missing access is reported explicitly; it is never replaced with fabricated data.</div>'}</div>` : ""}</section>`;
     }).join("");
     $("research-panels").querySelectorAll("details").forEach((element) => { element.open = openDetails.has(element.dataset.detailKey); });
   }
 
+  function syncTradingStyleForm(preset = false) {
+    const form = $("config-form");
+    const intraday = form.elements.namedItem("trading_style").value === "aggressive_intraday";
+    form.elements.namedItem("cycle_minutes").min = intraday ? "1" : "15";
+    form.elements.namedItem("max_cycles_per_day").max = intraday ? "1440" : "24";
+    if (preset) {
+      form.elements.namedItem("cycle_minutes").value = intraday ? "1" : "60";
+      form.elements.namedItem("max_cycles_per_day").value = intraday ? "390" : "4";
+      if (intraday) form.elements.namedItem("agent_mode").value = "autonomous";
+    }
+  }
+
   function loadForm() {
     const experiment = state.experiment;
-    const defaults = { agent_mode: "reviewer", asset_scope: "equities", research_rounds: 3, cycle_minutes: 60, max_cycles_per_day: 4, max_orders_per_cycle: 3, compound_profits: false, auto_resume: true, loss_limit_includes_model_costs: false, output_token_limit: 8192 };
-    for (const key of ["mode", "agent_mode", "asset_scope", "total_capital", "target", "loss_limit", "position_cap_pct", "exposure_cap_pct", "slippage_bps", "fee_bps", "monthly_model_budget", "research_rounds", "cycle_minutes", "max_cycles_per_day", "max_orders_per_cycle", "output_token_limit"]) {
+    const defaults = { trading_style: "balanced", agent_mode: "reviewer", asset_scope: "equities", research_rounds: 3, cycle_minutes: 60, max_cycles_per_day: 4, max_orders_per_cycle: 3, compound_profits: false, auto_resume: true, loss_limit_includes_model_costs: false, output_token_limit: 8192 };
+    for (const key of ["mode", "agent_mode", "trading_style", "asset_scope", "total_capital", "target", "loss_limit", "position_cap_pct", "exposure_cap_pct", "slippage_bps", "fee_bps", "monthly_model_budget", "research_rounds", "cycle_minutes", "max_cycles_per_day", "max_orders_per_cycle", "output_token_limit"]) {
       const input = $("config-form").elements.namedItem(key);
       if (input) input.value = experiment[key] ?? defaults[key] ?? "";
     }
     $("config-form").elements.namedItem("compound_profits").checked = experiment.compound_profits ?? defaults.compound_profits;
     for (const key of ["auto_resume", "loss_limit_includes_model_costs"]) $("config-form").elements.namedItem(key).checked = experiment[key] ?? defaults[key];
     $("agent-editor").innerHTML = state.agents.map(agentEditorRow).join("");
+    syncTradingStyleForm();
     formLoaded = true;
   }
 
@@ -664,7 +683,7 @@
   function readConfig() {
     const form = $("config-form");
     if (!form.reportValidity()) return null;
-    const config = { mode: form.elements.namedItem("mode").value, agent_mode: form.elements.namedItem("agent_mode").value, asset_scope: form.elements.namedItem("asset_scope").value, compound_profits: form.elements.namedItem("compound_profits").checked, auto_resume: form.elements.namedItem("auto_resume").checked, loss_limit_includes_model_costs: form.elements.namedItem("loss_limit_includes_model_costs").checked };
+    const config = { mode: form.elements.namedItem("mode").value, agent_mode: form.elements.namedItem("agent_mode").value, asset_scope: form.elements.namedItem("asset_scope").value, trading_style: form.elements.namedItem("trading_style").value, compound_profits: form.elements.namedItem("compound_profits").checked, auto_resume: form.elements.namedItem("auto_resume").checked, loss_limit_includes_model_costs: form.elements.namedItem("loss_limit_includes_model_costs").checked };
     for (const key of ["total_capital", "target", "loss_limit", "position_cap_pct", "exposure_cap_pct", "slippage_bps", "fee_bps", "monthly_model_budget", "research_rounds", "cycle_minutes", "max_cycles_per_day", "max_orders_per_cycle", "output_token_limit"]) config[key] = Number(form.elements.namedItem(key).value);
     config.agents = [...document.querySelectorAll(".agent-edit-row")].map((row) => {
       const agent = { id: row.dataset.agentId };
@@ -760,6 +779,9 @@
   document.querySelectorAll("[data-view], [data-go-view]").forEach((button) => button.addEventListener("click", () => setView(button.dataset.view || button.dataset.goView)));
   window.addEventListener("hashchange", () => setView(location.hash.slice(1)));
   $("refresh-button").addEventListener("click", () => authenticated ? refresh() : connectSession());
+  $("trading-style-button").addEventListener("click", () => mutate("/api/trading-style",
+    { style: state.experiment.trading_style === "aggressive_intraday" ? "balanced" : "aggressive_intraday" },
+    "Trading style updated. Existing positions, history, risk caps and model budget were retained.", true));
   $("resume-button").addEventListener("click", () => mutate("/api/resume", {}, "New entries enabled. The next demo or paper cycle can evaluate the strategy."));
   $("halt-button").addEventListener("click", haltIndependently);
   $("demo-button").addEventListener("click", () => mutate("/api/demo", { count: Number($("demo-count").value) }, "Synthetic sessions recorded. No AI or broker calls were made."));
@@ -772,6 +794,7 @@
     $("test-connections").textContent = event.target.checked ? "Check paper + paid model connections" : "Check paper connections";
   });
   $("test-connections").addEventListener("click", () => mutate("/api/test-connections", { paid_model: $("test-paid-model").checked }, "Connection check finished. Read each result in Setup; a completed check can still report a failed connection."));
+  $("config-form").elements.namedItem("trading_style").addEventListener("change", () => syncTradingStyleForm(true));
   $("config-form").addEventListener("submit", (event) => {
     event.preventDefault();
     const config = readConfig();

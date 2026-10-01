@@ -442,7 +442,7 @@ def main():
             parser.error(str(exc) if isinstance(exc, ValueError) else 'The private access-token file could not be created.')
         print('Remote access token (shown once; keep it private):\n' + token)
         return
-    from arena.service import Service, load_env
+    from arena.service import Service, load_env, VERSION
     load_env(ROOT / '.env')
     try:
         public_origin = validate_public_origin(args.public_origin) if args.public_origin else None
@@ -482,7 +482,7 @@ def main():
                 service.engine.event('Automatic cycle scheduling failed; no order retry was made.', 'error')
 
     def monitor():
-        while not stop.wait(15):
+        while not stop.wait(5 if service.engine.snapshot()['experiment'].get('trading_style') == 'aggressive_intraday' else 15):
             try:
                 service.monitor()
             except Exception:
@@ -491,7 +491,7 @@ def main():
     threading.Thread(target=scheduler, name='arena-scheduler', daemon=True).start()
     threading.Thread(target=monitor, name='arena-monitor', daemon=True).start()
     url = public_origin or f'http://127.0.0.1:{server.server_port}'
-    print(f'Agent Arena v0.6.0 — PAPER ONLY\nOpen {url}\nListening on loopback 127.0.0.1:{server.server_port}.\nKeep this process running. Ctrl+C stops the app; broker orders remain.\nRestart recovery follows your auto-resume preference and verifies accounts before trading. Operator stops remain in effect.')
+    print(f'Agent Arena v{VERSION} — PAPER ONLY\nOpen {url}\nListening on loopback 127.0.0.1:{server.server_port}.\nKeep this process running. Ctrl+C stops the app; broker orders remain.\nRestart recovery follows your auto-resume preference and verifies accounts before trading. Operator stops remain in effect.')
     if public_origin:
         print('Remote sign-in is required. HTTPS must be provided by your configured reverse proxy.')
     if not args.no_browser:

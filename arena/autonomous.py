@@ -17,7 +17,7 @@ from .adapters import ApiError, validate_autonomous_response
 
 MAX_RECORD_BYTES = 12000
 MAX_INPUT_BYTES = 40000
-KINDS = frozenset(("search_assets", "quotes", "bars", "news", "movers", "crypto_movers"))
+KINDS = frozenset(("search_assets", "quotes", "bars", "intraday_bars", "news", "movers", "crypto_movers"))
 EXCHANGES = frozenset(("NYSE", "NASDAQ", "ARCA", "AMEX", "BATS", "NYSEARCA"))
 SYMBOL = re.compile(r"(?:[A-Z][A-Z0-9.\-]{0,14}|[A-Z0-9]{2,15}/USD)")
 UTC = dt.timezone.utc
@@ -131,9 +131,9 @@ class AutonomousResearch:
             raise ValueError("Research symbols must be unique.")
         if type(lookback) is not int or not 15 <= lookback <= 365:
             raise ValueError("Research lookback must be between 15 and 365 days.")
-        if kind in ("quotes", "bars") and not symbols:
+        if kind in ("quotes", "bars", "intraday_bars") and not symbols:
             raise ValueError("This research tool requires at least one symbol.")
-        if kind in ("quotes", "bars", "news") and any(not self.is_eligible(s) for s in symbols):
+        if kind in ("quotes", "bars", "intraday_bars", "news") and any(not self.is_eligible(s) for s in symbols):
             raise ValueError("A requested symbol is outside the eligible asset directory.")
         return {"kind": kind, "query": query, "symbols": list(symbols), "lookback_days": lookback}
 
@@ -192,6 +192,38 @@ class AutonomousResearch:
         if not output:
             raise ValueError("No valid quotes are available for these symbols.")
         return {"quotes": output, "unavailable_symbols": unavailable}, False
+
+    def _intraday_bars(self, request):
+        raw = self.broker.intraday_bars(request["symbols"], self.at)
+        end = dt.datetime.fromisoformat(self.at.replace("Z", "+00:00")).astimezone(UTC).replace(second=0, microsecond=0)
+        start = end - dt.timedelta(hours=2)
+        output = {}
+        for symbol in request["symbols"]:
+            rows = raw.get(symbol, [])
+            if not isinstance(rows, list) or len(rows) > 5000:
+                raise ValueError("Intraday history exceeds its bound.")
+            clean, stamps = [], set()
+            for row in rows:
+                stamp = dt.datetime.fromisoformat(row["t"].replace("Z", "+00:00"))
+                if stamp.tzinfo is None:
+                    raise ValueError("Intraday timestamp requires a timezone.")
+                if not start <= stamp or stamp + dt.timedelta(minutes=1) > end:
+                    continue
+                if stamp in stamps:
+                    raise ValueError("Duplicate intraday bar.")
+                stamps.add(stamp)
+                values = {k: _number(row[k], True) for k in ("o", "h", "l", "c")}
+                if values["l"] > min(values["o"], values["c"]) or values["h"] < max(values["o"], values["c"]):
+                    raise ValueError("Inconsistent intraday prices.")
+                clean.append({"t": row["t"], **values, "v": _number(row.get("v", 0)),
+                              "feed": row.get("feed", "unknown")})
+            clean.sort(key=lambda r: r["t"])
+            if not clean:
+                raise ValueError("No completed intraday bars available.")
+            output[symbol] = {"bars": clean[-60:], "returned_count": min(60, len(clean)),
+                              "completed_bars_only": True, "timeframe": "1Min",
+                              "return_pct": 100 * (clean[-1]["c"] / clean[0]["o"] - 1)}
+        return {"bars": output}, any(len(rows) > 60 for rows in raw.values())
 
     def _bars(self, request):
         raw = {}
@@ -355,12 +387,13 @@ class AutonomousResearch:
         try:
             request = self._request(request)
             record.update(kind=request["kind"], request=request)
-            dispatch = {"search_assets": self._search, "quotes": self._quotes, "bars": self._bars,
+            dispatch = {"search_assets": self._search, "quotes": self._quotes, "bars": self._bars, "intraday_bars": self._intraday_bars,
                         "news": self._news, "movers": self._movers, "crypto_movers": self._crypto_movers}
             data, truncated = dispatch[request["kind"]](request)
             record.update(data=data, truncated=truncated, status="ok")
             record["source"] = {"search_assets": "Alpaca eligible asset directory", "quotes": "Alpaca snapshots (feed and price quality recorded per symbol)",
-                                "bars": "Alpaca completed daily stock sessions or UTC crypto days (feed and adjustment recorded)", "news": "Alpaca news summaries",
+                                "bars": "Alpaca completed daily stock sessions or UTC crypto days (feed and adjustment recorded)",
+                                "intraday_bars": "Alpaca completed one-minute bars from the last two hours; actual feed recorded", "news": "Alpaca news summaries",
                                 "movers": "Alpaca stock market movers", "crypto_movers": "Alpaca US crypto snapshots versus previous UTC close"}[request["kind"]]
             return self._bounded(record)
         except Exception:
@@ -382,6 +415,15 @@ def _compact_evidence(record):
                            "universe_count": data.get("universe_count"), "match_count": data.get("match_count")}
     elif record["kind"] == "quotes":
         compact["data"] = deepcopy(data)
+    elif record["kind"] == "intraday_bars":
+        compact["data"] = {"bars": {symbol: {
+            "bars": deepcopy(item.get("bars", [])[-3:]),
+            "timeframe": item.get("timeframe"),
+            "completed_bars_only": item.get("completed_bars_only"),
+            "window_return_pct": item.get("return_pct"),
+            "original_returned_count": item.get("returned_count"),
+            "returned_count": min(3, len(item.get("bars", [])))
+        } for symbol, item in data.get("bars", {}).items()}}
     elif record["kind"] == "bars":
         compact["data"] = {"bars": {symbol: {"summary": deepcopy(item["summary"])} for symbol, item in data.get("bars", {}).items()},
                            "provenance": deepcopy(data.get("provenance", {}))}
@@ -433,7 +475,7 @@ def _matching(record, symbol):
     data = record.get("data", {})
     if record["kind"] == "quotes":
         return symbol in data.get("quotes", {})
-    if record["kind"] == "bars":
+    if record["kind"] in ("bars", "intraday_bars"):
         return symbol in data.get("bars", {})
     if record["kind"] == "search_assets":
         return any(item.get("symbol") == symbol for item in data.get("assets", []))
