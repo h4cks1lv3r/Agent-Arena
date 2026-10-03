@@ -201,6 +201,14 @@ class Engine:
             # A server update never broadens an existing account's trading scope.
             experiment.setdefault("asset_scope", "equities")
             experiment.setdefault("trading_style", "balanced")
+            style = experiment["trading_style"]
+            guard = experiment.setdefault("day_trade_guard", {
+                "enabled": style.startswith("fast_swing"), "strict": style == "fast_swing_strict"})
+            if (not isinstance(guard, dict) or set(guard) != {"enabled", "strict"}
+                    or any(type(value) is not bool for value in guard.values())):
+                raise EngineError("Saved same-day trading protection is invalid; orders remain disabled.")
+            if style.startswith("fast_swing"):
+                guard.update(enabled=True, strict=style == "fast_swing_strict")
             experiment.setdefault("compound_profits", False)
             for key in ("research_rounds", "cycle_minutes", "max_cycles_per_day", "max_orders_per_cycle"):
                 experiment.setdefault(key, _defaults()[key])
@@ -515,6 +523,9 @@ class Engine:
     def _fresh(self, cfg, archives=None):
         created = _now()
         experiment = {key: deepcopy(value) for key, value in cfg.items() if key != "agents"}
+        experiment["day_trade_guard"] = {
+            "enabled": cfg["trading_style"].startswith("fast_swing"),
+            "strict": cfg["trading_style"] == "fast_swing_strict"}
         experiment.update({"id": _id(), "status": "paused", "halt_reason": "", "step": 0,
                            "created_at": created, "autopilot": False, "started": False})
         agents = []
@@ -662,7 +673,7 @@ class Engine:
                 result["archives"].append({key: archived[key] for key in ("id", "created_at", "mode", "total_capital")})
             return result
 
-    def set_trading_style(self, style, model_budget=None):
+    def set_trading_style(self, style, model_budget=None, strict_same_day=None):
         """Change execution pace without resetting history, positions or risk caps."""
         with self._write():
             raw = {"trading_style": style, "cycle_minutes": 1 if style in ("aggressive_intraday", "fast_swing", "fast_swing_strict") else 60,
@@ -671,6 +682,19 @@ class Engine:
                 raw["monthly_model_budget"] = model_budget
             cfg = _config(raw, self._get_config())
             exp = self._state["experiment"]
+            guard = exp["day_trade_guard"]
+            if style == "aggressive_intraday" and guard["enabled"]:
+                raise EngineError("Intraday trading conflicts with the saved same-day trading protection.")
+            if strict_same_day is not None and type(strict_same_day) is not bool:
+                raise EngineError("Strict same-day protection must be true or false.")
+            if style.startswith("fast_swing"):
+                if strict_same_day is not None and strict_same_day != (style == "fast_swing_strict"):
+                    raise EngineError("Strict same-day protection conflicts with the selected trading style.")
+                guard.update(enabled=True, strict=style == "fast_swing_strict")
+            elif strict_same_day is not None:
+                if not guard["enabled"]:
+                    raise EngineError("Enable overnight trading before changing strict same-day protection.")
+                guard["strict"] = strict_same_day
             exp["trading_style"] = cfg["trading_style"]
             exp["monthly_model_budget"] = cfg["monthly_model_budget"]
             exp["cycle_minutes"] = 1 if style in ("aggressive_intraday", "fast_swing", "fast_swing_strict") else 60
@@ -678,12 +702,22 @@ class Engine:
             self._event("Trading style changed by operator: " + style + ". Existing risk caps and history retained.")
         return self.snapshot()
 
+    @staticmethod
+    def _retain_day_trade_guard(experiment, previous):
+        guard = previous.get("day_trade_guard", {})
+        if guard.get("enabled"):
+            if experiment["trading_style"] == "aggressive_intraday":
+                raise EngineError("Intraday trading conflicts with the saved same-day trading protection.")
+            if not experiment["day_trade_guard"]["enabled"]:
+                experiment["day_trade_guard"] = deepcopy(guard)
+
     def configure(self, config):
         with self._write():
             if self._state["experiment"]["started"] or self._state["orders"] or self._state["decisions"]:
                 raise EngineError("Configuration is locked after an experiment starts. Create a new experiment.")
             old = self._state["experiment"]
             fresh = self._fresh(_config(config, self._get_config()), deepcopy(self._state["archives"]))
+            self._retain_day_trade_guard(fresh["experiment"], old)
             fresh["experiment"]["id"] = old["id"]
             fresh["experiment"]["created_at"] = old["created_at"]
             if old["status"] == "halted":
@@ -702,11 +736,14 @@ class Engine:
             if self._pending():
                 raise EngineError("Reconcile all pending orders before creating an experiment.")
             cfg = _config(config)
+            fresh = self._fresh(cfg)
+            self._retain_day_trade_guard(fresh["experiment"], self._state["experiment"])
             old = self.state()
             self._db.execute("INSERT INTO arena_archives(id,payload) VALUES(?,?)", (old["experiment"]["id"], json.dumps(old, allow_nan=False)))
             archives = deepcopy(old["archives"])
             archives.append({key: old["experiment"][key] for key in ("id", "created_at", "mode", "total_capital")})
-            self._state = self._fresh(cfg, archives)
+            fresh["archives"] = archives
+            self._state = fresh
             self._event("New experiment created. Existing broker positions and funds were not changed.")
             self._refresh()
         return self.snapshot()

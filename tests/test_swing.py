@@ -4,8 +4,9 @@ import datetime as dt
 import unittest
 from unittest.mock import Mock, patch
 
+from arena.adapters import ApiError
 from arena.service import ExecutionDeferred
-from arena.swing import check_order, next_session_due, session_dates
+from arena.swing import audit_history, check_order, next_session_due, session_dates
 import test_intraday as intraday
 import test_service_autonomous as fixtures
 
@@ -86,6 +87,43 @@ class SwingGuardTests(unittest.TestCase):
                    filled("MSFT", "sell", self.at.isoformat(), "partial-3")]
         with self.assertRaises(ValueError):
             check_order(records, self.positions, SESSIONS, self.at, "MSFT", "sell", protective=True)
+
+
+    def test_working_buy_or_sell_blocks_an_interleaved_protective_exit(self):
+        for side in ("buy", "sell"):
+            working = {**self.buy, "id": "working-" + side, "side": side, "status": "partially_filled"}
+            with self.subTest(side=side), self.assertRaises(ValueError):
+                check_order([self.buy, working], self.positions, SESSIONS, self.at, "MSFT", "sell", protective=True)
+        canceled = {**self.buy, "id": "canceled-partial", "status": "canceled"}
+        check_order([canceled], self.positions, SESSIONS, self.at, "MSFT", "sell", protective=True)
+
+    def test_excess_prior_activity_does_not_block_an_overnight_risk_reduction(self):
+        records = []
+        stamp = "2026-09-16T14:00:00+00:00"
+        for index in range(4):
+            symbol = ("AMD", "NVDA", "QQQ", "SPY")[index]
+            records += [filled(symbol, "buy", stamp, "buy-" + str(index)),
+                        filled(symbol, "sell", stamp, "sell-" + str(index))]
+        old = filled("MSFT", "buy", stamp, "overnight")
+        check_order(records + [old], {"MSFT": {"opened_at": stamp}}, SESSIONS, self.at, "MSFT", "sell")
+        with self.assertRaises(ValueError):
+            check_order(records + [self.buy], self.positions, SESSIONS, self.at, "MSFT", "sell", protective=True)
+
+    def test_later_partial_fill_blocks_routine_exit_despite_older_position_date(self):
+        partial = {**self.buy, "submitted_at": "2026-09-16T14:00:00+00:00", "status": "canceled"}
+        old_positions = {"MSFT": {"opened_at": partial["submitted_at"]}}
+        with self.assertRaises(ValueError):
+            check_order([partial], old_positions, SESSIONS, self.at, "MSFT", "sell")
+        check_order([partial], old_positions, SESSIONS, self.at, "MSFT", "sell", protective=True)
+
+    def test_capacity_expires_only_after_the_session_leaves_the_window(self):
+        stamp = "2026-09-10T14:00:00+00:00"
+        records = []
+        for index, symbol in enumerate(("AMD", "NVDA", "QQQ")):
+            records += [filled(symbol, "buy", stamp, "buy-" + str(index)),
+                        filled(symbol, "sell", stamp, "sell-" + str(index))]
+        self.assertEqual(audit_history(records, {}, SESSIONS, self.at)["reserved_round_trip_capacity"], 0)
+        self.assertEqual(check_order(records, {}, SESSIONS, self.at, "MSFT", "buy")["reserved_round_trip_capacity"], 1)
 
 
 class SwingServiceTests(unittest.TestCase):
@@ -183,3 +221,110 @@ class SwingServiceTests(unittest.TestCase):
             pass
         broker.submit_order.assert_not_called()
         self.assertFalse(self.svc.engine.pending_orders())
+
+    def test_balanced_mode_preserves_strict_guard_and_blocks_same_day_sales(self):
+        self.svc.set_trading_style({"style": "fast_swing_strict"})
+        self.svc.set_trading_style({"style": "balanced"})
+        self.buy()
+        state = self.svc.public_state()
+        self.assertEqual(state["experiment"]["day_trade_guard"], {"enabled": True, "strict": True})
+        self.assertTrue(state["trading_policy"]["day_trade_guard_enabled"])
+        self.assertFalse(state["trading_policy"]["protective_same_day_exits"])
+        for protective in (False, True):
+            with self.subTest(protective=protective), self.assertRaises(ExecutionDeferred):
+                self.svc._submit(self.agent(), "MSFT", "sell", 100, qty=.25, protective=protective)
+        self.brokers["openai"].submit_order.assert_not_called()
+        self.svc.set_trading_style({"style": "balanced", "strict_same_day": False})
+        self.assertEqual(self.svc.engine.snapshot()["experiment"]["trading_style"], "balanced")
+        self.assertFalse(self.svc.engine.snapshot()["experiment"]["day_trade_guard"]["strict"])
+
+    def test_intraday_profile_cannot_disable_saved_guard(self):
+        with self.assertRaises(ValueError):
+            self.svc.set_trading_style({"style": "aggressive_intraday"})
+        self.assertEqual(self.svc.engine.snapshot()["experiment"]["trading_style"], "fast_swing")
+
+    def test_restart_preserves_guard_after_switching_to_balanced(self):
+        self.svc.set_trading_style({"style": "fast_swing_strict"})
+        self.svc.set_trading_style({"style": "balanced"})
+        previous = self.svc
+        previous.meta.close()
+        previous.engine.close()
+        self.services.remove(previous)
+        self.svc = self.make_service()
+        self.assertEqual(self.svc.engine.snapshot()["experiment"]["day_trade_guard"], {"enabled": True, "strict": True})
+        self.assertFalse(self.svc.public_state()["trading_policy"]["protective_same_day_exits"])
+
+    def test_new_experiment_and_configuration_retain_guard(self):
+        self.svc.set_trading_style({"style": "fast_swing_strict"})
+        self.svc.new_experiment(self.config)
+        self.svc.engine.configure({"trading_style": "balanced"})
+        self.assertEqual(self.svc.engine.snapshot()["experiment"]["day_trade_guard"], {"enabled": True, "strict": True})
+        with self.assertRaises(ValueError):
+            self.svc.engine.configure({"trading_style": "aggressive_intraday", "cycle_minutes": 1, "max_cycles_per_day": 390})
+        with self.assertRaises(ValueError):
+            self.svc.new_experiment({**self.config, "trading_style": "aggressive_intraday"})
+        self.assertTrue(self.svc.engine.snapshot()["experiment"]["day_trade_guard"]["enabled"])
+
+    def stale_quote_before_slow_read(self, broker):
+        stamp = (self.time - dt.timedelta(seconds=100)).isoformat()
+        original = broker.quotes
+        broker.quotes = Mock(side_effect=lambda symbols: {
+            symbol: {**quote, "t": stamp} for symbol, quote in original(symbols).items()})
+
+    def test_slow_history_read_rechecks_quote_before_reservation(self):
+        broker = self.brokers["openai"]
+        self.stale_quote_before_slow_read(broker)
+        original = broker.orders
+        def delayed(**kwargs):
+            result = original(**kwargs)
+            self.advance(31)
+            return result
+        broker.orders = Mock(side_effect=delayed)
+        with self.assertRaises(ExecutionDeferred):
+            self.svc._submit(self.agent(), "MSFT", "buy", 100, notional=25)
+        self.assertEqual(self.svc.engine.orders(), [])
+        broker.submit_order.assert_not_called()
+
+    def test_slow_account_read_rechecks_quote_before_reservation(self):
+        broker = self.brokers["openai"]
+        self.stale_quote_before_slow_read(broker)
+        account = broker.account()
+        def delayed():
+            self.advance(31)
+            return account
+        broker.account = Mock(side_effect=delayed)
+        with self.assertRaises(ExecutionDeferred):
+            self.svc._submit(self.agent(), "MSFT", "buy", 100, notional=25)
+        self.assertEqual(self.svc.engine.orders(), [])
+        broker.submit_order.assert_not_called()
+
+    def test_quote_expiring_after_reservation_releases_it_without_post(self):
+        broker = self.brokers["openai"]
+        self.stale_quote_before_slow_read(broker)
+        original = self.svc.engine.reserve_order
+        def delayed(*args, **kwargs):
+            result = original(*args, **kwargs)
+            self.advance(31)
+            return result
+        with patch.object(self.svc.engine, "reserve_order", side_effect=delayed), self.assertRaises(ExecutionDeferred):
+            self.svc._submit(self.agent(), "MSFT", "buy", 100, notional=25)
+        self.assertEqual(self.svc.engine.orders()[0]["status"], "rejected")
+        self.assertFalse(self.svc.engine.pending_orders())
+        broker.submit_order.assert_not_called()
+
+    def test_balanced_guard_still_checks_current_buying_power(self):
+        self.svc.set_trading_style({"style": "balanced"})
+        broker = self.brokers["openai"]
+        broker.account.return_value["buying_power"] = "10"
+        with self.assertRaises(ExecutionDeferred):
+            self.svc._submit(self.agent(), "MSFT", "buy", 100, notional=25)
+        self.assertEqual(self.svc.engine.orders(), [])
+        broker.submit_order.assert_not_called()
+
+    def test_unavailable_full_history_never_creates_a_reservation_or_order(self):
+        broker = self.brokers["openai"]
+        broker.orders = Mock(side_effect=ApiError("Complete history is unavailable."))
+        with self.assertRaises(ApiError):
+            self.svc._submit(self.agent(), "MSFT", "buy", 100, notional=25)
+        self.assertEqual(self.svc.engine.orders(), [])
+        broker.submit_order.assert_not_called()

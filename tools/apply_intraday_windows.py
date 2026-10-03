@@ -73,7 +73,7 @@ class LocalArena:
     def mutate(self, route, body):
         self.request(route, body)
         state = self.wait_idle()
-        if state.get("server_job", {}).get("status") == "error":
+        if state.get("server_job", {}).get("status") in ("error", "failed", "canceled"):
             raise RuntimeError("Arena control did not complete; inspect the dashboard.")
         return state
 
@@ -116,7 +116,7 @@ def deploy(args):
     if source == target or source.is_relative_to(target) or target.is_relative_to(source):
         raise RuntimeError("Source and installed directories must be separate.")
     validation = args.validation.read_text(encoding="utf-8-sig")
-    if "Ran 386 tests" not in validation or "\nOK" not in validation or "FAILED" in validation:
+    if "Ran 399 tests" not in validation or "\nOK" not in validation or "FAILED" in validation:
         raise RuntimeError("The complete offline regression suite must pass before deployment.")
     for root in (source, target):
         for path in root.rglob("*"):
@@ -189,10 +189,20 @@ def deploy(args):
             break
         except (OSError, ValueError, RuntimeError):
             time.sleep(.5)
-    if replacement is None or state["version"] != "0.7.1" or state["experiment"]["id"] != exp["id"]:
+    if replacement is None or state["version"] != "0.7.2" or state["experiment"]["id"] != exp["id"]:
         raise RuntimeError("The updated server could not be verified.")
     budget = exp["monthly_model_budget"] if args.model_budget is None else args.model_budget
-    state = replacement.mutate("/api/trading-style", {"style": args.trading_style, "monthly_model_budget": budget})
+    style = args.trading_style
+    if style is None:
+        style = exp.get("trading_style", "fast_swing")
+        if style not in ("fast_swing", "fast_swing_strict", "balanced") or (
+                style == "balanced" and not exp.get("day_trade_guard", {}).get("enabled")):
+            style = "fast_swing"
+    state = replacement.mutate("/api/trading-style", {"style": style, "monthly_model_budget": budget})
+    if not state["experiment"].get("day_trade_guard", {}).get("enabled"):
+        raise RuntimeError("The saved same-day stock protection was not enabled.")
+    if exp.get("day_trade_guard", {}).get("strict") and args.trading_style is None and not state["experiment"]["day_trade_guard"]["strict"]:
+        raise RuntimeError("Strict same-day stock protection was not preserved.")
     for key in ("target", "loss_limit", "position_cap_pct", "exposure_cap_pct", "asset_scope"):
         if state["experiment"].get(key) != exp.get(key):
             raise RuntimeError("An existing experiment boundary changed unexpectedly.")
@@ -202,6 +212,11 @@ def deploy(args):
     if preferences["autopilot"]:
         state = replacement.mutate("/api/autopilot", {"enabled": True})
     state = replacement.state()
+    for key in ("autopilot", "auto_resume"):
+        if state["experiment"].get(key) != preferences[key]:
+            raise RuntimeError("An automation preference was not restored; inspect the dashboard.")
+    if preferences["status"] == "ready" and state["experiment"]["status"] != "ready":
+        raise RuntimeError("The updated experiment has not resumed; inspect the dashboard.")
     preferences["complete"] = True
     preferences_path.write_text(json.dumps(preferences))
     print(json.dumps({"version": state["version"], "style": state["experiment"]["trading_style"],
@@ -220,7 +235,7 @@ def main():
     parser.add_argument("--source", type=Path)
     parser.add_argument("--validation", type=Path)
     parser.add_argument("--model-budget", type=float)
-    parser.add_argument("--trading-style", choices=("fast_swing", "fast_swing_strict"), default="fast_swing")
+    parser.add_argument("--trading-style", choices=("balanced", "fast_swing", "fast_swing_strict"))
     parser.add_argument("--inspect", action="store_true")
     args = parser.parse_args()
     try:

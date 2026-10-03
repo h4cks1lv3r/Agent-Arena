@@ -283,13 +283,16 @@
     const jobActive = ["queued", "running"].includes(job?.status);
     const operationBusy = busy || jobActive;
     const swing = experiment.trading_style?.startsWith("fast_swing");
+    const protectedStocks = experiment.day_trade_guard?.enabled || swing;
     $("trading-style-button").disabled = operationBusy || demo || !autonomousMode();
     $("trading-style-button").textContent = swing ? "Use balanced trading" : "Use fast overnight trading";
     $("trading-style-detail").textContent = swing
       ? "Fast overnight: 1-minute AI reviews and local checks about every 5 seconds. Routine exits wait for the next trading session. Protective exits use a conservative three-round-trip capacity over five broker sessions. Existing risk and API budget limits apply."
-      : "Balanced trading permits longer holds. Fast overnight trading reviews opportunities quickly while avoiding routine same-day stock round trips.";
-    $("strict-swing-row").hidden = !swing;
-    $("strict-swing-toggle").checked = experiment.trading_style === "fast_swing_strict";
+      : protectedStocks
+        ? "Balanced trading uses slower reviews and permits longer holds. Your same-day stock protection remains active, including the five-session capacity and no same-day re-entry."
+        : "Balanced trading permits longer holds. Fast overnight trading reviews opportunities quickly while avoiding routine same-day stock round trips.";
+    $("strict-swing-row").hidden = !protectedStocks;
+    $("strict-swing-toggle").checked = experiment.day_trade_guard?.strict || experiment.trading_style === "fast_swing_strict";
     $("strict-swing-toggle").disabled = operationBusy;
     $("resume-button").disabled = operationBusy || experiment.status === "ready";
     $("halt-button").disabled = haltBusy || experiment.status === "halted";
@@ -783,10 +786,13 @@
   window.addEventListener("hashchange", () => setView(location.hash.slice(1)));
   $("refresh-button").addEventListener("click", () => authenticated ? refresh() : connectSession());
   $("trading-style-button").addEventListener("click", () => mutate("/api/trading-style",
-    { style: state.experiment.trading_style?.startsWith("fast_swing") ? "balanced" : "fast_swing" },
+    { style: state.experiment.trading_style?.startsWith("fast_swing") ? "balanced"
+      : state.experiment.day_trade_guard?.strict ? "fast_swing_strict" : "fast_swing" },
     "Trading style updated. Existing positions, history, risk caps and model budget were retained.", true));
   $("strict-swing-toggle").addEventListener("change", (event) => mutate("/api/trading-style",
-    { style: event.target.checked ? "fast_swing_strict" : "fast_swing" },
+    { style: state.experiment.trading_style?.startsWith("fast_swing")
+        ? event.target.checked ? "fast_swing_strict" : "fast_swing" : state.experiment.trading_style,
+      strict_same_day: event.target.checked },
     "Same-day exit policy updated. Strict mode also blocks protective stops until a later trading session.", true));
   $("resume-button").addEventListener("click", () => mutate("/api/resume", {}, "New entries enabled. The next demo or paper cycle can evaluate the strategy."));
   $("halt-button").addEventListener("click", haltIndependently);

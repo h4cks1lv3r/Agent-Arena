@@ -17,7 +17,7 @@ from .operation_guard import OperationCanceled, ensure_current_operation, operat
 
 UTC = dt.timezone.utc
 SYMBOLS = ('SPY', 'QQQ', 'IWM')
-VERSION = '0.7.1'
+VERSION = '0.7.2'
 
 class QuoteUnavailable(ValueError):
     """An execution quote is unavailable; other research and read work may continue."""
@@ -166,11 +166,11 @@ class Service:
         return self.public_state()
 
     def set_trading_style(self, body):
-        if not isinstance(body, dict) or set(body) - {"style", "monthly_model_budget"} or "style" not in body:
+        if not isinstance(body, dict) or set(body) - {"style", "monthly_model_budget", "strict_same_day"} or "style" not in body:
             raise ValueError("Supply a trading style and an optional model budget.")
         with self.control_lock:
             ensure_current_operation(self)
-            self.engine.set_trading_style(body["style"], body.get("monthly_model_budget"))
+            self.engine.set_trading_style(body["style"], body.get("monthly_model_budget"), body.get("strict_same_day"))
             for agent in self.engine.snapshot()["agents"]:
                 key = self._autonomy_key(agent["id"])
                 memory = self._get(key, {})
@@ -311,13 +311,18 @@ class Service:
                 activity = state['autonomy'].setdefault(agent['id'], {})
                 activity['effective_exits'] = {symbol: effective_exit(activity.get('exits', {}).get(symbol, {}), position)
                                                for symbol, position in agent['positions'].items()}
-        if state['experiment'].get('trading_style', '').startswith('fast_swing'):
+        guard = state['experiment'].get('day_trade_guard', {})
+        if guard.get('enabled'):
             from .swing import effective_exit, policy
-            state['trading_policy'] = policy(state['experiment']['trading_style'])
-            for agent in state['agents']:
-                activity = state['autonomy'].setdefault(agent['id'], {})
-                activity['effective_exits'] = {symbol: effective_exit(activity.get('exits', {}).get(symbol, {}), position)
-                                               for symbol, position in agent['positions'].items()}
+            style = state['experiment']['trading_style']
+            state['trading_policy'] = policy(style, strict=guard['strict'])
+            state['trading_policy']['review_minutes'] = state['experiment']['cycle_minutes']
+            state['trading_policy']['exit_check_seconds'] = monitor['refresh_seconds']
+            if style.startswith('fast_swing'):
+                for agent in state['agents']:
+                    activity = state['autonomy'].setdefault(agent['id'], {})
+                    activity['effective_exits'] = {symbol: effective_exit(activity.get('exits', {}).get(symbol, {}), position)
+                                                   for symbol, position in agent['positions'].items()}
         state['server_time'] = now().isoformat()
         state['snapshot_at'] = max(state.get('snapshot_at', ''), metadata_at)
         monitor['busy'] = self._busy.is_set() or self._monitor_busy.is_set()
@@ -893,6 +898,12 @@ class Service:
         if clock.get('next_close') and (parse_time(clock['next_close']).astimezone(UTC) - checked_at).total_seconds() < 90:
             raise ExecutionDeferred('Too close to the session close to submit a new paper order safely.')
 
+    @staticmethod
+    def _check_execution_quote(execution_at):
+        age = (now() - parse_time(execution_at).astimezone(UTC)).total_seconds()
+        if not -5 <= age <= 120:
+            raise ExecutionDeferred('Quote became stale during order checks; no broker order was sent.')
+
     def _swing_order_gate(self, agent, broker, symbol, side, current, protective):
         from .swing import check_order, session_dates
         today = ny_time(now()).date()
@@ -902,7 +913,7 @@ class Service:
             sessions = session_dates(broker.calendar((today - dt.timedelta(days=30)).isoformat(), today.isoformat()), today)
             self._put(key, sessions)
         result = check_order(broker.orders(status='all'), current['positions'], sessions, now(), symbol, side,
-                             protective=protective, strict=self.engine.snapshot()['experiment']['trading_style'] == 'fast_swing_strict')
+                             protective=protective, strict=self.engine.snapshot()['experiment']['day_trade_guard']['strict'])
         self._put('swing_guard:' + agent['id'], result)
 
     def _submit(self, agent, symbol, side, price, decision_id=None, *, notional=None, qty=None, automatic=False, protective=False):
@@ -939,7 +950,7 @@ class Service:
         state = self.engine.snapshot()
         exp = state['experiment']
         current = next(a for a in state['agents'] if a['id'] == agent['id'])
-        if exp.get('trading_style', '').startswith('fast_swing') and not crypto:
+        if exp.get('day_trade_guard', {}).get('enabled') and not crypto:
             try:
                 self._swing_order_gate(agent, broker, symbol, side, current, protective)
             except (ValueError, KeyError, TypeError, OverflowError) as exc:
@@ -949,7 +960,8 @@ class Service:
             amount = notional if notional is not None else math.floor(self._entry_capacity(agent['id'], symbol, price) * 100) / 100
             if amount < 1:
                 return
-            if exp.get('trading_style') in ('aggressive_intraday', 'fast_swing', 'fast_swing_strict'):
+            if (exp.get('day_trade_guard', {}).get('enabled')
+                    or exp.get('trading_style') in ('aggressive_intraday', 'fast_swing', 'fast_swing_strict')):
                 from .intraday import check_entry
                 try:
                     check_entry(broker.account(), quote, amount, clock, now(), crypto=crypto)
@@ -957,6 +969,8 @@ class Service:
                     raise ExecutionDeferred("Intraday entry deferred: " + str(exc)) from None
             with self.control_lock:
                 ensure_current_operation(self)
+                self._check_execution_quote(execution_at)
+                self._check_execution_session(clock, side, crypto=crypto)
                 order = self.engine.reserve_order(agent['id'], symbol, side, price, notional=amount, decision_id=decision_id)
         else:
             qty = float(Decimal(str(qty if qty is not None else current['positions'].get(symbol, {}).get('qty', 0))).quantize(Decimal('0.000000001'), rounding=ROUND_DOWN))
@@ -964,6 +978,8 @@ class Service:
                 return
             with self.control_lock:
                 ensure_current_operation(self)
+                self._check_execution_quote(execution_at)
+                self._check_execution_session(clock, side, crypto=crypto)
                 order = self.engine.reserve_order(agent['id'], symbol, side, price, qty=qty, decision_id=decision_id)
         payload = {'symbol': symbol, 'side': side, 'type': 'market', 'time_in_force': 'gtc' if crypto else 'day', 'client_order_id': order['client_order_id']}
         payload['notional' if side == 'buy' else 'qty'] = format(Decimal(str(order['notional'] if side == 'buy' else order['qty'])), 'f')
@@ -972,6 +988,7 @@ class Service:
                 self.engine.update_order(order['id'], {'status': 'rejected', 'filled_qty': '0'})
                 return
             self._check_execution_session(clock, side, crypto=crypto)
+            self._check_execution_quote(execution_at)
             ensure_current_operation(self)
             result = broker.submit_order(payload)
             self.engine.update_order(order['id'], result)

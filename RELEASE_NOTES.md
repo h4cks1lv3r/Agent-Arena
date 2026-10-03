@@ -1,3 +1,10 @@
+# Agent Arena server 0.7.2
+
+- Retain saved same-day stock protection and strictness across Balanced mode, restarts, configuration and new experiments. Reject the intraday profile while that protection is enabled.
+- Prevent interleaved stock orders while a buy or sell is working. Continue to count partial fills conservatively and permit an overnight risk-reducing sale that adds no same-day round trip.
+- Recheck quote/session freshness after broker history and account reads, and again before submission. Preserve strictness and verify automation preferences when updating the installed server.
+- Add PDT_RULES_REVIEW.md, a read-only account-policy audit tool, 13 offline regressions and dashboard runtime assertions. Validation: 399 Python tests and the dashboard runtime/syntax checks passed. Read VALIDATION_v0.7.2.md.
+
 # Agent Arena server 0.7.1
 
 - Add fast overnight trading in place of the dashboard intraday shortcut: retain one-minute reviews and five-second local checks, with routine stock exits deferred until a later purchase-day trading session. Remove the forced 30-minute and pre-close exits from this profile.

@@ -1,4 +1,4 @@
-# Fast overnight trading (server v0.7.1)
+# Fast overnight trading (server v0.7.2)
 
 This profile follows the request to trade actively without routine day trading. It preserves the existing experiment, allocations, asset scope, positions, credentials, audit history, loss/position/exposure boundaries and paid-model budget.
 
@@ -17,4 +17,4 @@ Sources checked October 1, 2026:
 - [Alpaca implementation notice](https://alpaca.markets/blog/finra-retires-the-pdt-rule-introducing-alpacas-new-intraday-margin-framework/)
 - [FINRA regulatory notice 26-10](https://www.finra.org/rules-guidance/notices/26-10)
 
-The dashboard no longer offers the former intraday shortcut. The prior profile remains an explicit backend compatibility option; this update activates fast_swing by default. Existing Android clients load the server/dashboard changes after Refresh, without a new APK.
+The dashboard no longer offers the former intraday shortcut. Same-day protection persists across pace changes, restarts and new experiments. Strictness is retained when switching pace; the conflicting intraday profile is rejected while the guard is enabled. A working order in the same stock must finish or be canceled before another order is admitted. Read PDT_RULES_REVIEW.md for the sourced rules review. Existing Android clients load the server/dashboard changes after Refresh, without a new APK.

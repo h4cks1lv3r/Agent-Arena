@@ -57,6 +57,17 @@ const submit=()=>$('order-resolution-form').dispatchEvent(new w.Event('submit',{
  w.document.querySelector('[data-resolve-order]').click();
  state.experiment.id='different-experiment';await poll();
  assert.equal($('order-resolution-panel').hidden,true);
+ state.experiment.trading_style='balanced';
+ state.experiment.day_trade_guard={enabled:true,strict:true};
+ await poll();
+ assert.equal($('strict-swing-row').hidden,false,'Saved stock protection must stay visible in Balanced mode.');
+ assert.equal($('strict-swing-toggle').checked,true);
+ assert.match($('trading-style-detail').textContent,/protection remains active/);
+ $('trading-style-button').click();await wait();
+ assert.equal(calls.filter(x=>x.url==='/api/trading-style').at(-1).body.style,'fast_swing_strict','Changing pace must retain strict protection.');
+ $('strict-swing-toggle').checked=false;
+ $('strict-swing-toggle').dispatchEvent(new w.Event('change',{bubbles:true}));await wait();
+ assert.deepEqual(calls.filter(x=>x.url==='/api/trading-style').at(-1).body,{style:'balanced',strict_same_day:false},'Changing strictness must retain Balanced pace.');
  assert.deepEqual(errors,[]);
  console.log('PASS: broker-confirmation UI requires attestation, binds exact experiment/client ID, uses CSRF and background job, keeps halt available, clears resolved/stale forms.');
 }finally{w.close()}})().catch(e=>{console.error(e);process.exitCode=1});

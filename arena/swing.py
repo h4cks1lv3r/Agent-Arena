@@ -9,15 +9,18 @@ LIMIT = 3
 TERMINAL = {"filled", "canceled", "expired", "rejected", "replaced"}
 
 
-def policy(style="fast_swing"):
-    strict = style == "fast_swing_strict"
-    return {"style": style, "review_minutes": 1, "exit_check_seconds": 5,
+def policy(style="fast_swing", *, strict=None):
+    strict = style == "fast_swing_strict" if strict is None else strict
+    fast = style.startswith("fast_swing")
+    return {"style": style, "day_trade_guard_enabled": True,
+            "review_minutes": 1 if fast else 60, "exit_check_seconds": 5 if fast else 15,
             "routine_same_day_exits": False, "protective_same_day_exits": not strict,
             "protective_round_trip_limit": LIMIT, "window_trading_sessions": 5,
             "objective": "Seek short overnight opportunities with positive expected net return. "
                          "Do not plan same-day stock round trips, pyramiding or same-day re-entry. "
-                         "Routine exits begin at the next eligible stock session, without a 30-minute "
-                         "holding cap or forced closing-time liquidation. Use minute bars for timing, "
+                         + ("Routine exits begin at the next eligible stock session. " if fast
+                            else "Exit timing follows the selected strategy after the purchase day. ")
+                         + "There is no forced same-day liquidation. Use minute bars for timing, "
                          "but assess overnight risk. Cash, broker restrictions, risk caps and API budget apply.",
             "protection": ("All same-day stock exits are blocked, including stops; overnight losses can grow."
                            if strict else "Same-day stop-loss exits are allowed only within a conservative "
@@ -101,9 +104,18 @@ def _capacity(groups, today):
     return total
 
 
+def audit_history(orders, positions, sessions, at, *, strict=False):
+    groups, today = _groups(orders, positions, sessions, at)
+    return {"reserved_round_trip_capacity": _capacity(groups, today), "limit": LIMIT,
+            "trading_sessions": list(sessions), "strict_same_day_block": strict,
+            "checked_at": at.isoformat()}
+
+
 def check_order(orders, positions, sessions, at, symbol, side, *, protective=False, strict=False):
     groups, today = _groups(orders, positions, sessions, at)
     current = groups.get((today, symbol), {"buy": set(), "sell": set()})
+    if any(row.get("symbol") == symbol and row.get("status") not in TERMINAL for row in orders):
+        raise ValueError("A working stock order must finish or be canceled before another order in that symbol.")
     if side == "buy":
         if symbol in positions or current["buy"] or current["sell"]:
             raise ValueError("No stock pyramiding or same-day re-entry in short-swing mode.")
@@ -115,10 +127,11 @@ def check_order(orders, positions, sessions, at, symbol, side, *, protective=Fal
     projected = deepcopy(groups)
     projected.setdefault((today, symbol), {"buy": set(), "sell": set()})[side].add("proposed-order")
     capacity = _capacity(projected, today)
-    if capacity > LIMIT:
+    if capacity > LIMIT and (side == "buy" or current["buy"]):
         raise ValueError("Protective round-trip capacity is exhausted in the five-session window.")
     return {"reserved_round_trip_capacity": capacity, "limit": LIMIT,
-            "trading_sessions": list(sessions), "strict_same_day_block": strict}
+            "trading_sessions": list(sessions), "strict_same_day_block": strict,
+            "checked_at": at.isoformat()}
 
 
 def effective_exit(rule, position):
